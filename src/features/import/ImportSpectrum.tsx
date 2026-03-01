@@ -22,7 +22,14 @@ export function ImportSpectrum() {
     for (const file of files) {
       try {
         const text = await file.text()
-        const spectrum = parseSpectrumText(text, file.name)
+        const parsedSpectrum = parseSpectrumText(text, file.name)
+        const spectrum = {
+          ...parsedSpectrum,
+          meta: {
+            ...(parsedSpectrum.meta ?? {}),
+            sourceName: file.name,
+          },
+        }
 
         dispatch({
           type: 'SPECTRUM_ADD',

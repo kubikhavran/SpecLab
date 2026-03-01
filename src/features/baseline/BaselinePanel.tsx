@@ -112,6 +112,21 @@ export function BaselinePanel() {
 
   return (
     <div className="space-y-2">
+      <label className="flex items-center gap-2 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+          checked={baseline.showOverlay}
+          onChange={(event) =>
+            dispatch({
+              type: 'BASELINE_SET',
+              patch: { showOverlay: event.currentTarget.checked },
+            })
+          }
+        />
+        <span>Show baseline overlay</span>
+      </label>
+
       <label className="block space-y-1">
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-slate-600">Lambda</span>

@@ -18,6 +18,18 @@ const Plot = createPlotlyComponent(Plotly)
 
 const fallbackX: number[] = [100, 120, 140, 160, 180, 200, 220, 240]
 const fallbackY: number[] = [12, 18, 15, 24, 21, 27, 23, 30]
+const DEFAULT_COLORWAY = [
+  '#1f77b4',
+  '#ff7f0e',
+  '#2ca02c',
+  '#d62728',
+  '#9467bd',
+  '#8c564b',
+  '#e377c2',
+  '#7f7f7f',
+  '#bcbd22',
+  '#17becf',
+]
 
 type PlotAreaProps = {
   plotDivRef: MutableRefObject<PlotlyHTMLElement | null>
@@ -73,6 +85,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     activeSpectrumId,
     plot,
     graphics,
+    baseline,
     processedYById,
     baselineYById,
     smoothedYById,
@@ -151,7 +164,10 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       ? baselineYById[resolvedActiveSpectrum.id]
       : undefined
   const baselineTrace: Data | null =
-    !overlayMode && resolvedActiveSpectrum && Array.isArray(activeBaselineY)
+    !overlayMode &&
+    baseline.showOverlay &&
+    resolvedActiveSpectrum &&
+    Array.isArray(activeBaselineY)
       ? {
           type: 'scatter',
           mode: 'lines',
@@ -210,7 +226,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           const labelColor =
             paletteColors !== null
               ? paletteColors[index % paletteColors.length]
-              : '#0f172a'
+              : DEFAULT_COLORWAY[index % DEFAULT_COLORWAY.length]
 
           return {
             x: xs[bestI],
@@ -249,6 +265,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       : {}),
     margin: { l: 72, r: useInlineLabels ? 160 : 24, t: 24, b: 64 },
     showlegend: useInlineLabels ? false : traces.length > 1,
+    ...(paletteColors === null ? { colorway: DEFAULT_COLORWAY } : {}),
     ...(inlineAnnotations.length > 0 ? { annotations: inlineAnnotations } : {}),
     font: {
       family: graphics.fontFamily || 'Arial',

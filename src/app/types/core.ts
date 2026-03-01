@@ -24,6 +24,7 @@ export interface PlotSettings {
 
 export interface BaselineSettings {
   enabled: boolean
+  showOverlay: boolean
   lambda: number
   p: number
   iterations: number
