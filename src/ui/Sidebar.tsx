@@ -1,5 +1,6 @@
 import type { MutableRefObject } from 'react'
 import type { PlotlyHTMLElement } from 'plotly.js'
+import type { PlotCanvasMode, ThemeMode } from '../app/types/core'
 import { ImportSpectrum } from '../features/import/ImportSpectrum'
 import { ExportPanel } from '../features/export/ExportPanel'
 import { GraphicsPanel } from '../features/graphics/GraphicsPanel'
@@ -25,7 +26,7 @@ type SidebarProps = {
 }
 
 export function Sidebar({ plotDivRef }: SidebarProps) {
-  const { spectra, activeSpectrumId, plot } = useAppState()
+  const { spectra, activeSpectrumId, plot, themeMode, graphics } = useAppState()
   const dispatch = useAppDispatch()
   const stackOffsetDisabled = spectra.length < 2 || !plot.showAllSpectra
 
@@ -101,20 +102,56 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
 
   return (
     <div className="flex h-full min-w-0 flex-col overflow-x-hidden p-4">
-      <h1 className="text-lg font-semibold tracking-tight text-slate-900">
+      <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
         SpecLab
       </h1>
+      <label className="mt-3 block space-y-1">
+        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Theme</span>
+        <select
+          className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          value={themeMode}
+          onChange={(event) =>
+            dispatch({
+              type: 'THEME_SET',
+              mode: event.currentTarget.value as ThemeMode,
+            })
+          }
+        >
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label className="mt-2 block space-y-1">
+        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">Plot background</span>
+        <select
+          className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          value={graphics.plotCanvas}
+          onChange={(event) =>
+            dispatch({
+              type: 'GRAPHICS_SET',
+              patch: {
+                plotCanvas: event.currentTarget.value as PlotCanvasMode,
+              },
+            })
+          }
+        >
+          <option value="auto">Auto (match UI)</option>
+          <option value="white">White</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
 
       <div className="mt-4 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto pr-1">
         {sections.map((section) => (
           <details
             key={section}
-            className="rounded-lg border border-slate-200 bg-white shadow-sm"
+            className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
           >
-            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
               {section}
             </summary>
-            <div className="space-y-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+            <div className="space-y-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
               {section === 'Graf' ? (
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-xs text-slate-700">

@@ -1,3 +1,27 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900;
+  }
+
+  html.dark body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+.speclab-tick-bold .xtick text,
+.speclab-tick-bold .ytick text,
+.speclab-tick-bold .xaxislayer-above text,
+.speclab-tick-bold .yaxislayer-above text {
+  font-weight: 700 !important;
+}
+
+.speclab-tick-italic .xtick text,
+.speclab-tick-italic .ytick text,
+.speclab-tick-italic .xaxislayer-above text,
+.speclab-tick-italic .yaxislayer-above text {
+  font-style: italic !important;
+}

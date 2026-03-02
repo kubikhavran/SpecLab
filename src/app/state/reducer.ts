@@ -5,9 +5,11 @@ import type {
   PlotSettings,
   SmoothingSettings,
   Spectrum,
+  ThemeMode,
 } from '../types/core'
 
 export type Action =
+  | { type: 'THEME_SET'; mode: ThemeMode }
   | { type: 'SPECTRUM_ADD'; spectrum: Spectrum }
   | { type: 'SPECTRUM_SET_ACTIVE'; id: string }
   | { type: 'SPECTRUM_RENAME'; id: string; name: string }
@@ -122,6 +124,11 @@ function extractTokenFromText(
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'THEME_SET':
+      return {
+        ...state,
+        themeMode: action.mode,
+      }
     case 'SPECTRUM_ADD':
       return {
         ...state,

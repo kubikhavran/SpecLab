@@ -14,6 +14,7 @@ export interface Spectrum {
 export interface PlotSettings {
   showGrid: boolean
   showAllSpectra: boolean
+  reverseOverlayOrder: boolean
   stackOffset: number
   xMin?: number | null
   xMax?: number | null
@@ -35,26 +36,42 @@ export interface SmoothingSettings {
   polyOrder: number
 }
 
+export type ThemeMode = 'system' | 'light' | 'dark'
+export type PlotCanvasMode = 'auto' | 'white' | 'dark'
+
 export type GraphicsPalette =
   | 'auto'
+  | 'pubBold'
+  | 'pubColorblind'
+  | 'tolBright'
+  | 'tolMuted'
+  | 'deepRainbow'
+  | 'viridisDark'
+  | 'plasmaDark'
+  | 'cividisDark'
   | 'colorblind'
   | 'tableau10'
-  | 'set2'
   | 'dark2'
   | 'paired'
-  | 'accent'
-  | 'pastel1'
-  | 'pastel2'
   | 'viridis'
   | 'plasma'
   | 'magma'
   | 'cividis'
+  | 'electrochem'
   | 'mono'
   | 'neon'
 
 export type GraphicsSettings = {
   xLabel: string
   yLabel: string
+  axisLabelBold: boolean
+  axisLabelItalic: boolean
+  tickLabelBold: boolean
+  tickLabelItalic: boolean
+  showXTickMarks: boolean
+  showYTickMarks: boolean
+  spectrumLabelBold: boolean
+  spectrumLabelItalic: boolean
   showXTickLabels: boolean
   showYTickLabels: boolean
   showGrid: boolean
@@ -70,11 +87,13 @@ export type GraphicsSettings = {
   tickFontSize: number
   palette: GraphicsPalette
   inlineSpectrumLabels: boolean
+  plotCanvas: PlotCanvasMode
   exportWidth: number
   exportHeight: number
 }
 
 export interface AppState {
+  themeMode: ThemeMode
   spectra: Spectrum[]
   activeSpectrumId?: string
   plot: PlotSettings

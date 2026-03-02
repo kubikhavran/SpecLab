@@ -7,7 +7,7 @@ type ExtractSource = 'filename' | 'name'
 type ExtractPreset = 'mv' | 'firstNumber' | 'lastNumber' | 'regex' | 'slice'
 
 export function SpectrumList() {
-  const { spectra, activeSpectrumId } = useAppState()
+  const { spectra, activeSpectrumId, plot } = useAppState()
   const dispatch = useAppDispatch()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
@@ -107,6 +107,22 @@ export function SpectrumList() {
           Clear
         </button>
       </div>
+      <label className="flex items-center gap-2 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+          checked={plot.reverseOverlayOrder}
+          onChange={(event) =>
+            dispatch({
+              type: 'PLOT_SET',
+              patch: { reverseOverlayOrder: event.currentTarget.checked },
+            })
+          }
+          disabled={spectra.length < 2}
+        />
+        <span>Invert overlay order</span>
+      </label>
+      <p className="text-[11px] text-slate-500">Affects overlay stacking order.</p>
 
       <div className="flex flex-wrap items-center gap-1">
         <label className="sr-only" htmlFor="renumber-mode">

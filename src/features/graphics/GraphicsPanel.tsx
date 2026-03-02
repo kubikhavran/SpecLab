@@ -5,18 +5,19 @@ import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 const fontFamilies = ['Arial', 'Inter', 'Times New Roman', 'Courier New'] as const
 const paletteOptions: Array<{ label: string; value: GraphicsPalette }> = [
   { label: 'Auto (Plotly)', value: 'auto' },
-  { label: 'Colorblind (Okabe-Ito)', value: 'colorblind' },
+  { label: 'Publication Bold', value: 'pubBold' },
+  { label: 'Publication Colorblind', value: 'pubColorblind' },
+  { label: 'Tol Bright', value: 'tolBright' },
+  { label: 'Tol Muted', value: 'tolMuted' },
+  { label: 'Deep Rainbow', value: 'deepRainbow' },
+  { label: 'Viridis (dark)', value: 'viridisDark' },
+  { label: 'Plasma (dark)', value: 'plasmaDark' },
+  { label: 'Cividis (dark)', value: 'cividisDark' },
   { label: 'Tableau 10', value: 'tableau10' },
-  { label: 'Set2', value: 'set2' },
   { label: 'Dark2', value: 'dark2' },
   { label: 'Paired', value: 'paired' },
-  { label: 'Accent', value: 'accent' },
-  { label: 'Pastel1', value: 'pastel1' },
-  { label: 'Pastel2', value: 'pastel2' },
-  { label: 'Viridis', value: 'viridis' },
-  { label: 'Plasma', value: 'plasma' },
-  { label: 'Magma', value: 'magma' },
-  { label: 'Cividis', value: 'cividis' },
+  { label: 'Okabe-Ito (Colorblind)', value: 'colorblind' },
+  { label: 'Electrochem (red->purple)', value: 'electrochem' },
   { label: 'Monochrome', value: 'mono' },
   { label: 'Neon', value: 'neon' },
 ]
@@ -101,6 +102,37 @@ export function GraphicsPanel() {
           <input
             type="checkbox"
             className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.axisLabelBold}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { axisLabelBold: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Axis labels bold</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.axisLabelItalic}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { axisLabelItalic: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Axis labels italic</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1">
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
             checked={graphics.showXTickLabels}
             onChange={(event) =>
               dispatch({
@@ -124,6 +156,68 @@ export function GraphicsPanel() {
             }
           />
           <span>Show Y tick labels</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1">
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.tickLabelBold}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { tickLabelBold: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Tick labels bold</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.tickLabelItalic}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { tickLabelItalic: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Tick labels italic</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1">
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.showXTickMarks}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { showXTickMarks: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Show X tick marks</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            checked={graphics.showYTickMarks}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { showYTickMarks: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Show Y tick marks</span>
         </label>
       </div>
 
@@ -361,6 +455,38 @@ export function GraphicsPanel() {
         />
         <span>Inline spectrum labels</span>
       </label>
+      <div className="grid grid-cols-2 gap-1">
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+            checked={graphics.spectrumLabelBold}
+            disabled={!graphics.inlineSpectrumLabels}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { spectrumLabelBold: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Spectrum labels bold</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+            checked={graphics.spectrumLabelItalic}
+            disabled={!graphics.inlineSpectrumLabels}
+            onChange={(event) =>
+              dispatch({
+                type: 'GRAPHICS_SET',
+                patch: { spectrumLabelItalic: event.currentTarget.checked },
+              })
+            }
+          />
+          <span>Spectrum labels italic</span>
+        </label>
+      </div>
 
       <div className="grid grid-cols-2 gap-1">
         <label className="space-y-0.5">
@@ -408,3 +534,4 @@ export function GraphicsPanel() {
     </div>
   )
 }
+

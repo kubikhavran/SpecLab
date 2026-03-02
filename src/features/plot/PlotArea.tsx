@@ -1,10 +1,11 @@
-import type { MutableRefObject } from 'react'
+import { useEffect, type MutableRefObject } from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
 import type { Config, Data, Layout, PlotlyHTMLElement } from 'plotly.js'
 import { useAppState } from '../../app/state/AppStore'
 import type { Spectrum } from '../../app/types/core'
 import { getPaletteColors } from '../graphics/palettes'
+import { applyTickTextInlineStyles } from './tickTextStyles'
 
 type PlotSeries = {
   id: string
@@ -62,6 +63,104 @@ function truncateLabel(text: string, maxLength: number): string {
   return `${text.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&':
+        return '&amp;'
+      case '<':
+        return '&lt;'
+      case '>':
+        return '&gt;'
+      case '"':
+        return '&quot;'
+      case '\'':
+        return '&#39;'
+      default:
+        return char
+    }
+  })
+}
+
+function styleText(
+  str: string | undefined,
+  bold: boolean,
+  italic: boolean,
+): string {
+  const safe = escapeHtml(str ?? '')
+  if (!safe) {
+    return safe
+  }
+
+  if (bold && italic) {
+    return `<b><i>${safe}</i></b>`
+  }
+
+  if (bold) {
+    return `<b>${safe}</b>`
+  }
+
+  if (italic) {
+    return `<i>${safe}</i>`
+  }
+
+  return safe
+}
+
+function isTransparentColor(color: string | undefined): boolean {
+  if (!color) {
+    return true
+  }
+
+  const normalized = color.trim().toLowerCase()
+  if (!normalized || normalized === 'transparent') {
+    return true
+  }
+
+  if (!normalized.startsWith('rgba(')) {
+    return false
+  }
+
+  const channels = normalized
+    .slice(5, -1)
+    .split(',')
+    .map((part) => Number(part.trim()))
+
+  return channels.length === 4 && Number.isFinite(channels[3]) && channels[3] <= 0
+}
+
+function getInlineLabelBgColor(color: string | undefined): string {
+  if (isTransparentColor(color)) {
+    return 'rgba(0,0,0,0)'
+  }
+
+  return color ?? 'rgba(0,0,0,0)'
+}
+
+function getCanvasColor(mode: 'auto' | 'white' | 'dark'): string {
+  if (mode === 'white') {
+    return '#ffffff'
+  }
+
+  if (mode === 'dark') {
+    return '#0b1220'
+  }
+
+  return 'rgba(0, 0, 0, 0)'
+}
+
+function getCanvasFrameClass(mode: 'auto' | 'white' | 'dark'): string {
+  if (mode === 'white') {
+    return 'bg-white dark:bg-white'
+  }
+
+  if (mode === 'dark') {
+    return 'bg-slate-950/60 dark:bg-slate-950/60'
+  }
+
+  return 'bg-slate-50/70 dark:bg-slate-950/40'
+}
+
 function toSeries(
   spectrum: Spectrum,
   yValues: number[],
@@ -95,16 +194,27 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     spectra.find((spectrum) => spectrum.id === activeSpectrumId) ?? spectra[0]
   const resolvedActiveId = resolvedActiveSpectrum?.id
   const overlayMode = spectra.length > 0 && plot.showAllSpectra
+  const overlaySpectra = plot.reverseOverlayOrder
+    ? [...spectra].slice().reverse()
+    : spectra
   const useInlineLabels = overlayMode && graphics.inlineSpectrumLabels
 
   const plottedSpectra: Spectrum[] =
     spectra.length === 0
       ? []
       : overlayMode
-        ? spectra
+        ? overlaySpectra
         : [resolvedActiveSpectrum]
-  const xAxisLabel = graphics.xLabel.trim() || 'X'
-  const yAxisLabel = graphics.yLabel.trim() || 'Y'
+  const xAxisLabelStyled = styleText(
+    graphics.xLabel.trim() || 'X',
+    graphics.axisLabelBold,
+    graphics.axisLabelItalic,
+  )
+  const yAxisLabelStyled = styleText(
+    graphics.yLabel.trim() || 'Y',
+    graphics.axisLabelBold,
+    graphics.axisLabelItalic,
+  )
   const traceLineWidth = Math.max(1, graphics.traceLineWidth)
   const titleStandoff = Math.max(8, Math.round(graphics.baseFontSize * 0.8))
   const isBox = graphics.frameMode === 'box'
@@ -112,7 +222,6 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     traceLineWidth + 1,
     traceLineWidth,
   )
-  const paletteColors = getPaletteColors(graphics.palette)
   const previewW = clampInt(Math.round(graphics.exportWidth), 300, 8000)
   const previewH = clampInt(Math.round(graphics.exportHeight), 300, 8000)
   const shouldPreviewCanvasSize = graphics.previewCanvasSize
@@ -139,11 +248,14 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             isActive: false,
           },
         ]
+  const primaryTraceCount = series.length
+  const paletteColors = getPaletteColors(graphics.palette, primaryTraceCount)
 
   const primaryTraces: Data[] = series.map((entry, index) => {
     const paletteColor =
       paletteColors !== null
-        ? paletteColors[index % paletteColors.length]
+        ? (paletteColors[index] ??
+          paletteColors[index % paletteColors.length])
         : undefined
 
     return {
@@ -192,7 +304,11 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     baselineTrace !== null
       ? [...primaryTraces, baselineTrace]
       : primaryTraces
+  const plotCanvasMode = graphics.plotCanvas ?? 'auto'
+  const canvasColor = getCanvasColor(plotCanvasMode)
+  const canvasFrameClass = getCanvasFrameClass(plotCanvasMode)
   const hasXRange = plot.xMin != null && plot.xMax != null
+  const inlineLabelBgColor = getInlineLabelBgColor(canvasColor)
   const inlineAnnotations: NonNullable<Layout['annotations']> = useInlineLabels
     ? series
         .map((entry, index) => {
@@ -225,7 +341,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
 
           const labelColor =
             paletteColors !== null
-              ? paletteColors[index % paletteColors.length]
+              ? (paletteColors[index] ??
+                paletteColors[index % paletteColors.length])
               : DEFAULT_COLORWAY[index % DEFAULT_COLORWAY.length]
 
           return {
@@ -233,13 +350,18 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             y: ys[bestI],
             xref: 'x' as const,
             yref: 'y' as const,
-            text: truncateLabel(entry.name, 24),
+            text: styleText(
+              truncateLabel(entry.name, 24),
+              graphics.spectrumLabelBold,
+              graphics.spectrumLabelItalic,
+            ),
             showarrow: false,
             xanchor: 'left' as const,
             yanchor: 'middle' as const,
             xshift: 10,
-            bgcolor: 'rgba(255,255,255,0.7)',
-            bordercolor: 'rgba(0,0,0,0)',
+            bgcolor: inlineLabelBgColor,
+            bordercolor: inlineLabelBgColor,
+            borderwidth: 0,
             font: {
               color: labelColor,
               size: graphics.tickFontSize,
@@ -254,6 +376,31 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const xRange = getRange(allX)
   const yRange = getRange(allY)
   const hasYRange = plot.yMin != null && plot.yMax != null
+  const showXMarks = graphics.showXTickLabels && graphics.showXTickMarks
+  const showYMarks = graphics.showYTickLabels && graphics.showYTickMarks
+  const tickClass = [
+    'speclab-plot',
+    graphics.tickLabelBold ? 'speclab-tick-bold' : '',
+    graphics.tickLabelItalic ? 'speclab-tick-italic' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  useEffect(() => {
+    if (!plotDivRef.current) {
+      return
+    }
+
+    // Ensure export and live view share the same tick text styling.
+    applyTickTextInlineStyles(plotDivRef.current, {
+      tickLabelBold: graphics.tickLabelBold,
+      tickLabelItalic: graphics.tickLabelItalic,
+    })
+  }, [
+    graphics.tickLabelBold,
+    graphics.tickLabelItalic,
+    plotDivRef,
+  ])
 
   const layout: Partial<Layout> = {
     autosize: !shouldPreviewCanvasSize,
@@ -272,11 +419,11 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       size: graphics.baseFontSize,
       color: '#0f172a',
     },
-    paper_bgcolor: 'rgba(0, 0, 0, 0)',
-    plot_bgcolor: 'rgba(0, 0, 0, 0)',
+    paper_bgcolor: canvasColor,
+    plot_bgcolor: canvasColor,
     xaxis: {
       title: {
-        text: xAxisLabel,
+        text: xAxisLabelStyled,
         font: {
           size: graphics.baseFontSize + 2,
         },
@@ -292,8 +439,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       mirror: isBox,
       linewidth: graphics.axisLineWidth,
       linecolor: graphics.axisLineColor,
-      ticks: graphics.showXTickLabels ? 'outside' : '',
-      ticklen: graphics.showXTickLabels ? 6 : 0,
+      ticks: showXMarks ? 'outside' : '',
+      ticklen: showXMarks ? 6 : 0,
       tickcolor: graphics.axisLineColor,
       tickfont: {
         size: graphics.tickFontSize,
@@ -312,7 +459,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     },
     yaxis: {
       title: {
-        text: yAxisLabel,
+        text: yAxisLabelStyled,
         font: {
           size: graphics.baseFontSize + 2,
         },
@@ -328,8 +475,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       mirror: isBox,
       linewidth: graphics.axisLineWidth,
       linecolor: graphics.axisLineColor,
-      ticks: graphics.showYTickLabels ? 'outside' : '',
-      ticklen: graphics.showYTickLabels ? 6 : 0,
+      ticks: showYMarks ? 'outside' : '',
+      ticklen: showYMarks ? 6 : 0,
       tickcolor: graphics.axisLineColor,
       tickfont: {
         size: graphics.tickFontSize,
@@ -354,11 +501,11 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
 
   return (
     <section className="h-full">
-      <div className="flex h-full min-h-[30rem] flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900">Plot</h2>
+      <div className="flex h-full min-h-[30rem] flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Plot</h2>
 
         <div
-          className={`mt-4 min-h-[20rem] rounded-lg border border-slate-200 bg-slate-50/70 p-2 ${shouldPreviewCanvasSize ? '' : 'flex-1'}`}
+          className={`mt-4 min-h-[20rem] overflow-hidden rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${canvasFrameClass} ${shouldPreviewCanvasSize ? '' : 'flex-1'} ${tickClass}`}
           style={
             shouldPreviewCanvasSize
               ? { width: previewW, height: previewH }
@@ -366,22 +513,30 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           }
         >
           <Plot
-            className="h-full w-full"
+            className={`h-full w-full overflow-hidden ${tickClass}`}
             data={traces}
             layout={layout}
             config={config}
             onInitialized={(_, graphDiv) => {
               plotDivRef.current = graphDiv as PlotlyHTMLElement
+              applyTickTextInlineStyles(plotDivRef.current, {
+                tickLabelBold: graphics.tickLabelBold,
+                tickLabelItalic: graphics.tickLabelItalic,
+              })
             }}
             onUpdate={(_, graphDiv) => {
               plotDivRef.current = graphDiv as PlotlyHTMLElement
+              applyTickTextInlineStyles(plotDivRef.current, {
+                tickLabelBold: graphics.tickLabelBold,
+                tickLabelItalic: graphics.tickLabelItalic,
+              })
             }}
             useResizeHandler
             style={{ width: '100%', height: '100%' }}
           />
         </div>
 
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
           Debug: traces={traces.length}, active={resolvedActiveSpectrum?.name ?? 'none'}, x=[
           {formatRangeValue(xRange.min)}, {formatRangeValue(xRange.max)}], y=[
           {formatRangeValue(yRange.min)}, {formatRangeValue(yRange.max)}]
