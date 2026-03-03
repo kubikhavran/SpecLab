@@ -7,8 +7,14 @@ const LAMBDA_EXP_MIN = 4
 const LAMBDA_EXP_MAX = 9
 
 export function BaselinePanel() {
-  const { spectra, activeSpectrumId, baseline, processedYById, baselineYById } =
-    useAppState()
+  const {
+    spectra,
+    activeSpectrumId,
+    baseline,
+    cosmicCleanYById,
+    processedYById,
+    baselineYById,
+  } = useAppState()
   const dispatch = useAppDispatch()
 
   const activeSpectrum = useMemo(
@@ -42,13 +48,14 @@ export function BaselinePanel() {
       return
     }
 
+    const yInput = cosmicCleanYById[activeSpectrum.id] ?? activeSpectrum.y
     const baselineY = aslsBaseline(
-      activeSpectrum.y,
+      yInput,
       baseline.lambda,
       baseline.p,
       baseline.iterations,
     )
-    const processedY = applyBaseline(activeSpectrum.y, baselineY)
+    const processedY = applyBaseline(yInput, baselineY)
 
     dispatch({
       type: 'SPECTRUM_SET_PROCESSED',
@@ -80,13 +87,14 @@ export function BaselinePanel() {
     }
 
     for (const spectrum of spectra) {
+      const yInput = cosmicCleanYById[spectrum.id] ?? spectrum.y
       const baselineY = aslsBaseline(
-        spectrum.y,
+        yInput,
         baseline.lambda,
         baseline.p,
         baseline.iterations,
       )
-      const processedY = applyBaseline(spectrum.y, baselineY)
+      const processedY = applyBaseline(yInput, baselineY)
 
       dispatch({
         type: 'SPECTRUM_SET_PROCESSED',

@@ -1,31 +1,31 @@
 import type { KeyboardEvent } from 'react'
 import { useState } from 'react'
+import type { DataLabelingSettings, ExtractPreset, RenumberMode } from '../../app/types/core'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 
-type RenumberMode = 'index' | 'sequence' | 'extract'
-type ExtractSource = 'filename' | 'name'
-type ExtractPreset = 'mv' | 'firstNumber' | 'lastNumber' | 'regex' | 'slice'
-
 export function SpectrumList() {
-  const { spectra, activeSpectrumId, plot } = useAppState()
+  const { spectra, activeSpectrumId, plot, dataLabeling } = useAppState()
   const dispatch = useAppDispatch()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draftName, setDraftName] = useState('')
-  const [renumberMode, setRenumberMode] = useState<RenumberMode>('index')
-  const [renumberPrefix, setRenumberPrefix] = useState('')
-  const [sequenceStart, setSequenceStart] = useState('1')
-  const [sequenceStep, setSequenceStep] = useState('1')
-  const [sequenceSuffix, setSequenceSuffix] = useState('mV')
-  const [extractSource, setExtractSource] = useState<ExtractSource>('filename')
-  const [extractPreset, setExtractPreset] = useState<ExtractPreset>('mv')
-  const [extractRegex, setExtractRegex] = useState('(\\d+)mV')
-  const [extractSliceStart, setExtractSliceStart] = useState('0')
-  const [extractSliceEnd, setExtractSliceEnd] = useState('10')
-  const [extractTrimResult, setExtractTrimResult] = useState(true)
-  const [extractNumbersOnly, setExtractNumbersOnly] = useState(false)
-  const [extractPrefixText, setExtractPrefixText] = useState('')
-  const [extractSuffix, setExtractSuffix] = useState(' mV')
-  const [invertOrder, setInvertOrder] = useState(false)
+
+  const updateDataLabeling = (patch: Partial<DataLabelingSettings>) => {
+    dispatch({
+      type: 'DATA_LABELING_SET',
+      patch,
+    })
+  }
+
+  const updateLabelExtract = (
+    patch: Partial<DataLabelingSettings['labelExtract']>,
+  ) => {
+    updateDataLabeling({
+      labelExtract: {
+        ...dataLabeling.labelExtract,
+        ...patch,
+      },
+    })
+  }
 
   const cancelRename = () => {
     setEditingId(null)
@@ -58,20 +58,26 @@ export function SpectrumList() {
   }
 
   const handleAutoLabel = () => {
-    if (renumberMode === 'extract') {
+    if (dataLabeling.renumberMode === 'extract') {
+      if (dataLabeling.labelExtract.mode !== 'filename') {
+        return
+      }
+
       dispatch({
         type: 'SPECTRA_RENAME_BY_EXTRACT',
-        source: extractSource,
-        preset: extractPreset,
-        prefix: extractPrefixText,
-        suffix: extractSuffix,
-        ...(extractPreset === 'regex' ? { regex: extractRegex } : {}),
-        ...(extractPreset === 'slice'
+        source: 'filename',
+        preset: dataLabeling.labelExtract.preset,
+        prefix: dataLabeling.labelExtract.prefix,
+        suffix: dataLabeling.labelExtract.suffix,
+        ...(dataLabeling.labelExtract.preset === 'regex'
+          ? { regex: dataLabeling.labelExtract.regex }
+          : {}),
+        ...(dataLabeling.labelExtract.preset === 'slice'
           ? {
-              sliceStart: Number(extractSliceStart),
-              sliceEnd: Number(extractSliceEnd),
-              trimResult: extractTrimResult,
-              numbersOnly: extractNumbersOnly,
+              sliceStart: Number(dataLabeling.labelExtract.start),
+              sliceEnd: Number(dataLabeling.labelExtract.end),
+              trimResult: dataLabeling.labelExtract.trimResult,
+              numbersOnly: dataLabeling.labelExtract.numbersOnly,
             }
           : {}),
       })
@@ -80,14 +86,14 @@ export function SpectrumList() {
 
     dispatch({
       type: 'SPECTRA_RENAME_ALL',
-      prefix: renumberPrefix,
-      mode: renumberMode,
-      reverse: invertOrder,
-      ...(renumberMode === 'sequence'
+      prefix: dataLabeling.renumberPrefix,
+      mode: dataLabeling.renumberMode,
+      reverse: dataLabeling.invertOrder,
+      ...(dataLabeling.renumberMode === 'sequence'
         ? {
-            start: Number(sequenceStart),
-            step: Number(sequenceStep),
-            suffix: sequenceSuffix,
+            start: Number(dataLabeling.sequenceStart),
+            step: Number(dataLabeling.sequenceStep),
+            suffix: dataLabeling.sequenceSuffix,
           }
         : {}),
     })
@@ -131,13 +137,16 @@ export function SpectrumList() {
         <select
           id="renumber-mode"
           className="rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-          value={renumberMode}
+          value={dataLabeling.renumberMode}
           onChange={(event) => {
             const mode = event.currentTarget.value as RenumberMode
-            setRenumberMode(mode)
+            updateDataLabeling({ renumberMode: mode })
             if (mode !== 'index') {
-              setRenumberPrefix('')
+              updateDataLabeling({ renumberPrefix: '' })
             }
+            updateLabelExtract({
+              mode: mode === 'extract' ? 'filename' : 'none',
+            })
           }}
         >
           <option value="index">Numbers (1..N)</option>
@@ -151,8 +160,10 @@ export function SpectrumList() {
         <select
           id="renumber-prefix"
           className="rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-          value={renumberPrefix}
-          onChange={(event) => setRenumberPrefix(event.currentTarget.value)}
+          value={dataLabeling.renumberPrefix}
+          onChange={(event) =>
+            updateDataLabeling({ renumberPrefix: event.currentTarget.value })
+          }
         >
           <option value="">Numbers only</option>
           <option value="S">S</option>
@@ -164,21 +175,23 @@ export function SpectrumList() {
           onClick={handleAutoLabel}
           disabled={spectra.length === 0}
         >
-          {renumberMode === 'extract' ? 'Apply extract' : 'Renumber'}
+          {dataLabeling.renumberMode === 'extract' ? 'Apply extract' : 'Renumber'}
         </button>
       </div>
-      {renumberMode !== 'extract' ? (
+      {dataLabeling.renumberMode !== 'extract' ? (
         <label className="flex items-center gap-2 text-xs text-slate-700">
           <input
             type="checkbox"
             className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-            checked={invertOrder}
-            onChange={(event) => setInvertOrder(event.currentTarget.checked)}
+            checked={dataLabeling.invertOrder}
+            onChange={(event) =>
+              updateDataLabeling({ invertOrder: event.currentTarget.checked })
+            }
           />
           <span>Invert order</span>
         </label>
       ) : null}
-      {renumberMode === 'sequence' ? (
+      {dataLabeling.renumberMode === 'sequence' ? (
         <div className="grid grid-cols-3 gap-1">
           <label className="space-y-0.5">
             <span className="text-[11px] text-slate-600">Start</span>
@@ -186,8 +199,10 @@ export function SpectrumList() {
               type="text"
               inputMode="decimal"
               className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-              value={sequenceStart}
-              onChange={(event) => setSequenceStart(event.currentTarget.value)}
+              value={dataLabeling.sequenceStart}
+              onChange={(event) =>
+                updateDataLabeling({ sequenceStart: event.currentTarget.value })
+              }
             />
           </label>
           <label className="space-y-0.5">
@@ -196,8 +211,10 @@ export function SpectrumList() {
               type="text"
               inputMode="decimal"
               className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-              value={sequenceStep}
-              onChange={(event) => setSequenceStep(event.currentTarget.value)}
+              value={dataLabeling.sequenceStep}
+              onChange={(event) =>
+                updateDataLabeling({ sequenceStep: event.currentTarget.value })
+              }
             />
           </label>
           <label className="space-y-0.5">
@@ -206,57 +223,48 @@ export function SpectrumList() {
               type="text"
               placeholder=" mV"
               className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-              value={sequenceSuffix}
-              onChange={(event) => setSequenceSuffix(event.currentTarget.value)}
+              value={dataLabeling.sequenceSuffix}
+              onChange={(event) =>
+                updateDataLabeling({ sequenceSuffix: event.currentTarget.value })
+              }
             />
           </label>
         </div>
-      ) : renumberMode === 'extract' ? (
+      ) : dataLabeling.renumberMode === 'extract' ? (
         <div className="space-y-1">
-          <div className="grid grid-cols-2 gap-1">
-            <label className="space-y-0.5">
-              <span className="text-[11px] text-slate-600">Source</span>
-              <select
-                className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-                value={extractSource}
-                onChange={(event) =>
-                  setExtractSource(event.currentTarget.value as ExtractSource)
-                }
-              >
-                <option value="filename">Filename</option>
-                <option value="name">Current name</option>
-              </select>
-            </label>
-            <label className="space-y-0.5">
-              <span className="text-[11px] text-slate-600">Preset</span>
-              <select
-                className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-                value={extractPreset}
-                onChange={(event) =>
-                  setExtractPreset(event.currentTarget.value as ExtractPreset)
-                }
-              >
-                <option value="mv">mV token (...50mV...)</option>
-                <option value="firstNumber">First number</option>
-                <option value="lastNumber">Last number</option>
-                <option value="regex">Custom regex</option>
-                <option value="slice">Slice (start..end)</option>
-              </select>
-            </label>
-          </div>
-          {extractPreset === 'regex' ? (
+          <label className="space-y-0.5">
+            <span className="text-[11px] text-slate-600">Preset</span>
+            <select
+              className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
+              value={dataLabeling.labelExtract.preset}
+              onChange={(event) =>
+                updateLabelExtract({
+                  preset: event.currentTarget.value as ExtractPreset,
+                })
+              }
+            >
+              <option value="mv">mV token (...50mV...)</option>
+              <option value="firstNumber">First number</option>
+              <option value="lastNumber">Last number</option>
+              <option value="regex">Custom regex</option>
+              <option value="slice">Slice (start..end)</option>
+            </select>
+          </label>
+          {dataLabeling.labelExtract.preset === 'regex' ? (
             <label className="space-y-0.5">
               <span className="text-[11px] text-slate-600">Regex</span>
               <input
                 type="text"
                 className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
                 placeholder="(\\d+)mV"
-                value={extractRegex}
-                onChange={(event) => setExtractRegex(event.currentTarget.value)}
+                value={dataLabeling.labelExtract.regex}
+                onChange={(event) =>
+                  updateLabelExtract({ regex: event.currentTarget.value })
+                }
               />
             </label>
           ) : null}
-          {extractPreset === 'slice' ? (
+          {dataLabeling.labelExtract.preset === 'slice' ? (
             <div className="space-y-1">
               <div className="grid grid-cols-2 gap-1">
                 <label className="space-y-0.5">
@@ -265,9 +273,9 @@ export function SpectrumList() {
                     type="text"
                     inputMode="numeric"
                     className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-                    value={extractSliceStart}
+                    value={dataLabeling.labelExtract.start}
                     onChange={(event) =>
-                      setExtractSliceStart(event.currentTarget.value)
+                      updateLabelExtract({ start: event.currentTarget.value })
                     }
                   />
                 </label>
@@ -277,9 +285,9 @@ export function SpectrumList() {
                     type="text"
                     inputMode="numeric"
                     className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-                    value={extractSliceEnd}
+                    value={dataLabeling.labelExtract.end}
                     onChange={(event) =>
-                      setExtractSliceEnd(event.currentTarget.value)
+                      updateLabelExtract({ end: event.currentTarget.value })
                     }
                   />
                 </label>
@@ -288,9 +296,9 @@ export function SpectrumList() {
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                  checked={extractTrimResult}
+                  checked={dataLabeling.labelExtract.trimResult}
                   onChange={(event) =>
-                    setExtractTrimResult(event.currentTarget.checked)
+                    updateLabelExtract({ trimResult: event.currentTarget.checked })
                   }
                 />
                 <span>Trim result</span>
@@ -299,9 +307,11 @@ export function SpectrumList() {
                 <input
                   type="checkbox"
                   className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-                  checked={extractNumbersOnly}
+                  checked={dataLabeling.labelExtract.numbersOnly}
                   onChange={(event) =>
-                    setExtractNumbersOnly(event.currentTarget.checked)
+                    updateLabelExtract({
+                      numbersOnly: event.currentTarget.checked,
+                    })
                   }
                 />
                 <span>Numbers only</span>
@@ -322,9 +332,9 @@ export function SpectrumList() {
               <input
                 type="text"
                 className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
-                value={extractPrefixText}
+                value={dataLabeling.labelExtract.prefix}
                 onChange={(event) =>
-                  setExtractPrefixText(event.currentTarget.value)
+                  updateLabelExtract({ prefix: event.currentTarget.value })
                 }
               />
             </label>
@@ -334,8 +344,10 @@ export function SpectrumList() {
                 type="text"
                 className="w-full rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-700"
                 placeholder=" mV"
-                value={extractSuffix}
-                onChange={(event) => setExtractSuffix(event.currentTarget.value)}
+                value={dataLabeling.labelExtract.suffix}
+                onChange={(event) =>
+                  updateLabelExtract({ suffix: event.currentTarget.value })
+                }
               />
             </label>
           </div>

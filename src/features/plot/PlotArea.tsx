@@ -1,8 +1,14 @@
 import { useEffect, type MutableRefObject } from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
-import type { Config, Data, Layout, PlotlyHTMLElement } from 'plotly.js'
-import { useAppState } from '../../app/state/AppStore'
+import type {
+  Config,
+  Data,
+  Layout,
+  PlotlyHTMLElement,
+  PlotMouseEvent,
+} from 'plotly.js'
+import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import type { Spectrum } from '../../app/types/core'
 import { getPaletteColors } from '../graphics/palettes'
 import { applyTickTextInlineStyles } from './tickTextStyles'
@@ -36,8 +42,59 @@ type PlotAreaProps = {
   plotDivRef: MutableRefObject<PlotlyHTMLElement | null>
 }
 
+type SpectrumTraceMeta = {
+  spectrumId: string
+  isSpectrum: true
+}
+
 function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
+}
+
+function computeLayoutMargins(
+  shouldPreviewCanvasSize: boolean,
+  useInlineLabels: boolean,
+  options: {
+    baseFontSize: number
+    tickFontSize: number
+    showXTickLabels: boolean
+    showYTickLabels: boolean
+    axisLabelBold: boolean
+    axisLabelItalic: boolean
+  },
+): { l: number; r: number; t: number; b: number } {
+  const baseMargins = {
+    l: 72,
+    r: useInlineLabels ? 160 : 24,
+    t: 24,
+    b: 64,
+  }
+
+  if (!shouldPreviewCanvasSize) {
+    return baseMargins
+  }
+
+  const labelStyleFactor =
+    options.axisLabelBold || options.axisLabelItalic ? 1.1 : 1
+  const xTickExtra = options.showXTickLabels
+    ? Math.round(options.tickFontSize * 1.4)
+    : 0
+  const yTickExtra = options.showYTickLabels
+    ? Math.round(options.tickFontSize * 1.8)
+    : 0
+
+  return {
+    l: Math.max(
+      baseMargins.l,
+      Math.round(options.baseFontSize * 2.2 * labelStyleFactor + yTickExtra),
+    ),
+    r: baseMargins.r,
+    t: Math.max(baseMargins.t, Math.round(options.baseFontSize * 0.8)),
+    b: Math.max(
+      baseMargins.b,
+      Math.round(options.baseFontSize * 3.0 * labelStyleFactor + xTickExtra),
+    ),
+  }
 }
 
 function getRange(values: number[]): { min: number; max: number } {
@@ -185,10 +242,13 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     plot,
     graphics,
     baseline,
+    cosmicCleanYById,
     processedYById,
     baselineYById,
     smoothedYById,
   } = useAppState()
+  const dispatch = useAppDispatch()
+  const spectrumIds = new Set(spectra.map((spectrum) => spectrum.id))
 
   const resolvedActiveSpectrum =
     spectra.find((spectrum) => spectrum.id === activeSpectrumId) ?? spectra[0]
@@ -216,20 +276,23 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     graphics.axisLabelItalic,
   )
   const traceLineWidth = Math.max(1, graphics.traceLineWidth)
-  const titleStandoff = Math.max(8, Math.round(graphics.baseFontSize * 0.8))
+  const previewW = clampInt(Math.round(graphics.exportWidth), 300, 8000)
+  const previewH = clampInt(Math.round(graphics.exportHeight), 300, 8000)
+  const shouldPreviewCanvasSize = graphics.previewCanvasSize
+  const titleStandoff = shouldPreviewCanvasSize
+    ? Math.max(12, Math.round(graphics.baseFontSize * 0.9))
+    : Math.max(8, Math.round(graphics.baseFontSize * 0.8))
   const isBox = graphics.frameMode === 'box'
   const activeTraceLineWidth = Math.max(
     traceLineWidth + 1,
     traceLineWidth,
   )
-  const previewW = clampInt(Math.round(graphics.exportWidth), 300, 8000)
-  const previewH = clampInt(Math.round(graphics.exportHeight), 300, 8000)
-  const shouldPreviewCanvasSize = graphics.previewCanvasSize
 
   const series: PlotSeries[] =
     plottedSpectra.length > 0
       ? plottedSpectra.map((spectrum, index) => {
-          const yBase = processedYById[spectrum.id] ?? spectrum.y
+          const yRawOrCosmic = cosmicCleanYById[spectrum.id] ?? spectrum.y
+          const yBase = processedYById[spectrum.id] ?? yRawOrCosmic
           const yToPlot = smoothedYById[spectrum.id] ?? yBase
 
           return toSeries(
@@ -252,6 +315,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const paletteColors = getPaletteColors(graphics.palette, primaryTraceCount)
 
   const primaryTraces: Data[] = series.map((entry, index) => {
+    const isSpectrumTrace = spectrumIds.has(entry.id)
     const paletteColor =
       paletteColors !== null
         ? (paletteColors[index] ??
@@ -262,6 +326,15 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       type: 'scatter',
       mode: 'lines',
       name: entry.name,
+      ...(isSpectrumTrace
+        ? {
+            meta: {
+              spectrumId: entry.id,
+              isSpectrum: true,
+            } satisfies SpectrumTraceMeta,
+            legendgroup: entry.id,
+          }
+        : {}),
       x: entry.x,
       y: entry.y,
       line: {
@@ -378,6 +451,18 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const hasYRange = plot.yMin != null && plot.yMax != null
   const showXMarks = graphics.showXTickLabels && graphics.showXTickMarks
   const showYMarks = graphics.showYTickLabels && graphics.showYTickMarks
+  const layoutMargins = computeLayoutMargins(
+    shouldPreviewCanvasSize,
+    useInlineLabels,
+    {
+      baseFontSize: graphics.baseFontSize,
+      tickFontSize: graphics.tickFontSize,
+      showXTickLabels: graphics.showXTickLabels,
+      showYTickLabels: graphics.showYTickLabels,
+      axisLabelBold: graphics.axisLabelBold,
+      axisLabelItalic: graphics.axisLabelItalic,
+    },
+  )
   const tickClass = [
     'speclab-plot',
     graphics.tickLabelBold ? 'speclab-tick-bold' : '',
@@ -385,6 +470,52 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   ]
     .filter(Boolean)
     .join(' ')
+
+  const handlePlotClick = (event: Readonly<PlotMouseEvent>) => {
+    const points = event.points
+    if (!Array.isArray(points) || points.length === 0) {
+      return
+    }
+
+    const clickedSpectrumId = points.reduce<string | null>((found, point) => {
+      if (found) {
+        return found
+      }
+
+      const pointData = point.data as unknown as { meta?: unknown } | undefined
+      const meta = pointData?.meta
+      if (typeof meta !== 'object' || meta === null) {
+        return null
+      }
+
+      const metaObj = meta as {
+        isSpectrum?: unknown
+        spectrumId?: unknown
+      }
+
+      if (
+        metaObj.isSpectrum === true &&
+        typeof metaObj.spectrumId === 'string'
+      ) {
+        return metaObj.spectrumId
+      }
+
+      return null
+    }, null)
+
+    if (!clickedSpectrumId || !spectrumIds.has(clickedSpectrumId)) {
+      return
+    }
+
+    if (clickedSpectrumId === activeSpectrumId) {
+      return
+    }
+
+    dispatch({
+      type: 'SPECTRUM_SET_ACTIVE',
+      id: clickedSpectrumId,
+    })
+  }
 
   useEffect(() => {
     if (!plotDivRef.current) {
@@ -410,7 +541,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           height: previewH,
         }
       : {}),
-    margin: { l: 72, r: useInlineLabels ? 160 : 24, t: 24, b: 64 },
+    margin: layoutMargins,
     showlegend: useInlineLabels ? false : traces.length > 1,
     ...(paletteColors === null ? { colorway: DEFAULT_COLORWAY } : {}),
     ...(inlineAnnotations.length > 0 ? { annotations: inlineAnnotations } : {}),
@@ -531,6 +662,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
                 tickLabelItalic: graphics.tickLabelItalic,
               })
             }}
+            onClick={handlePlotClick}
             useResizeHandler
             style={{ width: '100%', height: '100%' }}
           />

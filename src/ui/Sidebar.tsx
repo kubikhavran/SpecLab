@@ -6,7 +6,9 @@ import { ExportPanel } from '../features/export/ExportPanel'
 import { GraphicsPanel } from '../features/graphics/GraphicsPanel'
 import { BaselinePanel } from '../features/baseline/BaselinePanel'
 import { SmoothingPanel } from '../features/smoothing/SmoothingPanel'
+import { CosmicRaysPanel } from '../features/cosmic/CosmicRaysPanel'
 import { SpectrumList } from '../features/import/SpectrumList'
+import { PresetsPanel } from '../features/presets/PresetsPanel'
 import { computeAutoFitY } from '../features/plot/autoFitY'
 import { useAppDispatch, useAppState } from '../app/state/AppStore'
 
@@ -148,7 +150,7 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
             key={section}
             className="rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
           >
-            <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+            <summary className="accordion-title cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
               {section}
             </summary>
             <div className="space-y-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
@@ -302,9 +304,13 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
               {section === 'Data' ? <SpectrumList /> : null}
               {section === 'Baseline' ? <BaselinePanel /> : null}
               {section === 'Smoothing' ? <SmoothingPanel /> : null}
+              {section === 'Cosmic rays' ? <CosmicRaysPanel /> : null}
               {section === 'Graphics' ? <GraphicsPanel /> : null}
               {section === 'Export' ? <ExportPanel plotDivRef={plotDivRef} /> : null}
-              <p>Placeholder controls for {section.toLowerCase()}.</p>
+              {section === 'Presets' ? <PresetsPanel /> : null}
+              {section !== 'Cosmic rays' && section !== 'Presets' ? (
+                <p>Placeholder controls for {section.toLowerCase()}.</p>
+              ) : null}
             </div>
           </details>
         ))}

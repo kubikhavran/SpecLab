@@ -1,4 +1,9 @@
-import type { AppState, ThemeMode } from '../types/core'
+import {
+  DEFAULT_DATA_LABELING_SETTINGS,
+  type AppState,
+  type ThemeMode,
+} from '../types/core'
+import { loadPresetsFromStorage } from '../../features/presets/presetsStorage'
 
 const THEME_STORAGE_KEY = 'speclab.theme'
 
@@ -39,9 +44,22 @@ export const initialState: AppState = {
     yMax: null,
     invertX: false,
   },
+  dataLabeling: { ...DEFAULT_DATA_LABELING_SETTINGS },
+  ...loadPresetsFromStorage(),
+  cosmicCleanYById: {},
+  manualCleanYById: {},
+  manualUndoStackById: {},
   processedYById: {},
   baselineYById: {},
   smoothedYById: {},
+  cosmic: {
+    window: 11,
+    threshold: 6,
+    maxWidth: 3,
+    positiveOnly: true,
+    iterations: 1,
+    manualEnabled: false,
+  },
   baseline: {
     enabled: false,
     showOverlay: true,

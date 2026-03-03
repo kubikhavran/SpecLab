@@ -36,6 +36,81 @@ export interface SmoothingSettings {
   polyOrder: number
 }
 
+export interface CosmicSettings {
+  window: number
+  threshold: number
+  maxWidth: number
+  positiveOnly: boolean
+  iterations: number
+  manualEnabled: boolean
+}
+
+export type RenumberMode = 'index' | 'sequence' | 'extract'
+export type ExtractPreset = 'mv' | 'firstNumber' | 'lastNumber' | 'regex' | 'slice'
+export type LabelExtractMode = 'none' | 'filename'
+
+export type LabelExtractSettings = {
+  mode: LabelExtractMode
+  preset: ExtractPreset
+  start: string
+  end: string
+  trimResult: boolean
+  numbersOnly: boolean
+  prefix: string
+  suffix: string
+  regex: string
+}
+
+export type DataLabelingSettings = {
+  renumberMode: RenumberMode
+  renumberPrefix: string
+  invertOrder: boolean
+  sequenceStart: string
+  sequenceStep: string
+  sequenceSuffix: string
+  labelExtract: LabelExtractSettings
+}
+
+export const DEFAULT_LABEL_EXTRACT_SETTINGS: LabelExtractSettings = {
+  mode: 'filename',
+  preset: 'mv',
+  start: '0',
+  end: '10',
+  trimResult: true,
+  numbersOnly: false,
+  prefix: '',
+  suffix: ' mV',
+  regex: '(\\d+)mV',
+}
+
+export const DEFAULT_DATA_LABELING_SETTINGS: DataLabelingSettings = {
+  renumberMode: 'index',
+  renumberPrefix: '',
+  invertOrder: false,
+  sequenceStart: '1',
+  sequenceStep: '1',
+  sequenceSuffix: 'mV',
+  labelExtract: DEFAULT_LABEL_EXTRACT_SETTINGS,
+}
+
+export type PresetPayload = {
+  themeMode: ThemeMode
+  plot: PlotSettings
+  graphics: GraphicsSettings
+  baseline: BaselineSettings
+  smoothing: SmoothingSettings
+  cosmic: CosmicSettings
+  dataLabeling: DataLabelingSettings
+}
+
+export type Preset = {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  payload: PresetPayload
+}
+
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type PlotCanvasMode = 'auto' | 'white' | 'dark'
 
@@ -97,9 +172,16 @@ export interface AppState {
   spectra: Spectrum[]
   activeSpectrumId?: string
   plot: PlotSettings
+  dataLabeling: DataLabelingSettings
+  presets: Preset[]
+  activePresetId: string | null
+  cosmicCleanYById: Record<string, number[]>
+  manualCleanYById: Record<string, number[]>
+  manualUndoStackById: Record<string, number[][]>
   processedYById: Record<string, number[]>
   baselineYById: Record<string, number[]>
   smoothedYById: Record<string, number[]>
+  cosmic: CosmicSettings
   baseline: BaselineSettings
   smoothing: SmoothingSettings
   graphics: GraphicsSettings

@@ -16,8 +16,12 @@ export type TickTextStyleSnapshot = TickTextStyleSnapshotEntry[]
 const TICK_TEXT_SELECTOR = [
   '.xtick text',
   '.ytick text',
+  '.xaxislayer-above text',
+  '.yaxislayer-above text',
   '.xaxislayer-above .xtick text',
   '.yaxislayer-above .ytick text',
+  '.xaxislayer-below text',
+  '.yaxislayer-below text',
   '.xaxislayer-below .xtick text',
   '.yaxislayer-below .ytick text',
 ].join(', ')

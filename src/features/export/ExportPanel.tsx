@@ -1,14 +1,15 @@
 import type { MutableRefObject } from 'react'
 import { useMemo, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
-import type { Data, DownloadImgopts, Layout, PlotlyHTMLElement } from 'plotly.js'
+import type { Data, Layout, PlotlyHTMLElement } from 'plotly.js'
 import { useAppState } from '../../app/state/AppStore'
 import { downloadTextFile } from '../../lib/downloadTextFile'
 import {
-  applyTickTextInlineStyles,
-  captureTickTextInlineStyles,
-  restoreTickTextInlineStyles,
-} from '../plot/tickTextStyles'
+  decodePlotlySvgDataUrl,
+  downloadPngFromSvg,
+  downloadSvg,
+  patchTickStyles,
+} from './exportSvgPipeline'
 import { exportAllToZip } from './exportAllToZip'
 import { spectrumToDelimitedText } from './exportSpectrumData'
 
@@ -57,6 +58,13 @@ type GraphDivState = PlotlyHTMLElement & {
   layout?: LooseLayout
   _fullLayout?: LooseLayout
   data?: LooseTrace[]
+}
+
+type LooseSpectrumTrace = {
+  type?: unknown
+  mode?: unknown
+  meta?: unknown
+  line?: { width?: unknown }
 }
 
 function sanitizeFilename(rawName: string): string {
@@ -113,6 +121,80 @@ function asNumber(value: unknown, fallback: number): number {
 
 function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
+}
+
+function getPrimarySpectrumTraceWidths(
+  graphDiv: PlotlyHTMLElement,
+): { indexes: number[]; widths: number[]; uniformWidth: number } {
+  const rawData = (graphDiv as unknown as { data?: unknown }).data
+  if (!Array.isArray(rawData)) {
+    return { indexes: [], widths: [], uniformWidth: 1.5 }
+  }
+
+  const indexes: number[] = []
+  const widths: number[] = []
+
+  rawData.forEach((trace, index) => {
+    if (typeof trace !== 'object' || trace === null) {
+      return
+    }
+
+    const traceAny = trace as LooseSpectrumTrace
+    const isScatter = traceAny.type === 'scatter'
+    const mode = typeof traceAny.mode === 'string' ? traceAny.mode : ''
+    const isLineMode = mode.includes('lines')
+    const meta =
+      typeof traceAny.meta === 'object' && traceAny.meta !== null
+        ? (traceAny.meta as { isSpectrum?: unknown })
+        : null
+    const isSpectrumTrace = meta?.isSpectrum === true
+
+    if (!isScatter || !isLineMode || !isSpectrumTrace) {
+      return
+    }
+
+    indexes.push(index)
+    widths.push(
+      typeof traceAny.line?.width === 'number' ? traceAny.line.width : 1.5,
+    )
+  })
+
+  if (indexes.length === 0) {
+    return { indexes: [], widths: [], uniformWidth: 1.5 }
+  }
+
+  return {
+    indexes,
+    widths,
+    uniformWidth: Math.min(...widths),
+  }
+}
+
+async function withUniformExportLineWidths(
+  graphDiv: PlotlyHTMLElement,
+  runExport: () => Promise<void>,
+) {
+  const traceInfo = getPrimarySpectrumTraceWidths(graphDiv)
+  if (traceInfo.indexes.length === 0) {
+    await runExport()
+    return
+  }
+
+  await Plotly.restyle(
+    graphDiv,
+    { 'line.width': traceInfo.uniformWidth } as unknown as Data,
+    traceInfo.indexes,
+  )
+
+  try {
+    await runExport()
+  } finally {
+    await Plotly.restyle(
+      graphDiv,
+      { 'line.width': traceInfo.widths } as unknown as Data,
+      traceInfo.indexes,
+    )
+  }
 }
 
 export function ExportPanel({ plotDivRef }: ExportPanelProps) {
@@ -190,14 +272,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
       return
     }
 
-    const downloadOptions: DownloadImgopts & { scale: number } = {
-      format,
-      filename,
-      width: exportW,
-      height: exportH,
-      scale: 2,
-    }
-
     setIsExporting(true)
 
     const graphState = graphDiv as GraphDivState
@@ -234,8 +308,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
             )
             .map((annotation) => ({ ...annotation }))
         : null
-    const tickStyleSnapshot = captureTickTextInlineStyles(graphDiv)
-
     const rawData = (graphDiv as unknown as { data?: unknown }).data
     const currentTraceWidths: number[] = Array.isArray(rawData)
       ? rawData.map((trace) => {
@@ -342,9 +414,35 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         } as unknown as Partial<Layout>)
       }
 
-      // Force tick text style into inline SVG before image capture.
-      applyTickTextInlineStyles(graphDiv, graphics)
-      await Plotly.downloadImage(graphDiv, downloadOptions)
+      await Plotly.redraw(graphDiv)
+
+      await withUniformExportLineWidths(graphDiv, async () => {
+        // Export pipeline: snapshot SVG first, patch tick styles in SVG, then output SVG/PNG.
+        const rawSvgDataUrl = await Plotly.toImage(graphDiv, {
+          format: 'svg',
+          width: exportW,
+          height: exportH,
+          scale: 1,
+        })
+        const rawSvgText = decodePlotlySvgDataUrl(rawSvgDataUrl)
+        const patchedSvgText = patchTickStyles(rawSvgText, {
+          tickLabelBold: graphics.tickLabelBold,
+          tickLabelItalic: graphics.tickLabelItalic,
+        })
+
+        if (format === 'svg') {
+          downloadSvg(patchedSvgText, `${filename}.svg`)
+        } else {
+          await downloadPngFromSvg({
+            svgText: patchedSvgText,
+            filename: `${filename}.png`,
+            width: exportW,
+            height: exportH,
+            scale: 2,
+            transparentBackground,
+          })
+        }
+      })
     } finally {
       try {
         if (currentTraceWidths.length > 0) {
@@ -361,8 +459,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
           graphDiv,
           restoreLayoutPatch as unknown as Partial<Layout>,
         )
-        restoreTickTextInlineStyles(tickStyleSnapshot)
-        applyTickTextInlineStyles(graphDiv, graphics)
       } finally {
         setIsExporting(false)
       }

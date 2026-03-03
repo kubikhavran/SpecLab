@@ -10,8 +10,14 @@ function clampPolyOrder(polyOrder: number, window: number): number {
 }
 
 export function SmoothingPanel() {
-  const { spectra, activeSpectrumId, smoothing, processedYById, smoothedYById } =
-    useAppState()
+  const {
+    spectra,
+    activeSpectrumId,
+    smoothing,
+    cosmicCleanYById,
+    processedYById,
+    smoothedYById,
+  } = useAppState()
   const dispatch = useAppDispatch()
 
   const activeSpectrum = useMemo(
@@ -35,7 +41,9 @@ export function SmoothingPanel() {
       return
     }
 
-    const baseY = processedYById[activeSpectrum.id] ?? activeSpectrum.y
+    const baseY =
+      processedYById[activeSpectrum.id] ??
+      (cosmicCleanYById[activeSpectrum.id] ?? activeSpectrum.y)
     const clampedPolyOrder = clampPolyOrder(smoothing.polyOrder, smoothing.window)
     const smoothed = savgolSmooth(baseY, smoothing.window, clampedPolyOrder)
 
@@ -66,7 +74,9 @@ export function SmoothingPanel() {
     const clampedPolyOrder = clampPolyOrder(smoothing.polyOrder, smoothing.window)
 
     for (const spectrum of spectra) {
-      const baseY = processedYById[spectrum.id] ?? spectrum.y
+      const baseY =
+        processedYById[spectrum.id] ??
+        (cosmicCleanYById[spectrum.id] ?? spectrum.y)
       const smoothed = savgolSmooth(baseY, smoothing.window, clampedPolyOrder)
 
       dispatch({
