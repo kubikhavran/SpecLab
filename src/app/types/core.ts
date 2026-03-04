@@ -244,6 +244,10 @@ export type GraphicsSettings = {
   exportHeight: number
 }
 
+export type ExportSettings = {
+  filename: string
+}
+
 export interface AppState {
   themeMode: ThemeMode
   spectra: Spectrum[]
@@ -266,4 +270,5 @@ export interface AppState {
   baseline: BaselineSettings
   smoothing: SmoothingSettings
   graphics: GraphicsSettings
+  export: ExportSettings
 }

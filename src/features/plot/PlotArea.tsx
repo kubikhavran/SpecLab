@@ -18,6 +18,7 @@ import type {
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import type { Peak, Spectrum } from '../../app/types/core'
 import { getPaletteColors } from '../graphics/palettes'
+import { PeaksListPanel } from '../peaks/PeaksListPanel'
 import { applyTickTextInlineStyles } from './tickTextStyles'
 
 type PlotSeries = {
@@ -591,6 +592,22 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           ? [resolvedActiveId]
           : []
         : plottedSpectra.map((spectrum) => spectrum.id)
+  const hasAnyPeaksForTable = (() => {
+    if (!peaks.enabled) {
+      return false
+    }
+
+    const countForSpectrum = (spectrumId: string): number =>
+      (peaksAutoById[spectrumId]?.length ?? 0) +
+      (peaksManualById[spectrumId]?.length ?? 0)
+
+    if (peaks.mode === 'active') {
+      const targetSpectrumId = resolvedActiveId ?? spectra[0]?.id
+      return targetSpectrumId ? countForSpectrum(targetSpectrumId) > 0 : false
+    }
+
+    return spectra.some((spectrum) => countForSpectrum(spectrum.id) > 0)
+  })()
   const regionMinInput = parseRegionBound(peaks.regionXMin)
   const regionMaxInput = parseRegionBound(peaks.regionXMax)
   const hasRegionFilter =
@@ -708,9 +725,6 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           ax: 0,
           ay: -40,
         }
-        const isSelectedPeak =
-          selectedPeak?.spectrumId === spectrum.id &&
-          selectedPeak.peakId === peak.id
 
         peakAnnotations.push({
           x: xValue,
@@ -734,11 +748,9 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             color: effectiveLabelColor,
             size: peaks.labelFontSize,
           },
-          bgcolor: isSelectedPeak
-            ? 'rgba(248,250,252,0.92)'
-            : 'rgba(0,0,0,0)',
-          bordercolor: isSelectedPeak ? spectrumColor : 'rgba(0,0,0,0)',
-          borderwidth: isSelectedPeak ? 1 : 0,
+          bgcolor: 'rgba(0,0,0,0)',
+          bordercolor: 'rgba(0,0,0,0)',
+          borderwidth: 0,
         })
         peakAnnotationBindings.push({
           spectrumId: spectrum.id,
@@ -1357,19 +1369,18 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         }
       : {}),
   }
+  const plotFrameStyle = shouldPreviewCanvasSize
+    ? { width: previewW, height: previewH }
+    : { height: 'clamp(360px, 70vh, 900px)' }
 
   return (
-    <section className="h-full">
-      <div className="flex h-full min-h-[30rem] flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section>
+      <div className="flex min-h-[30rem] flex-col rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Plot</h2>
 
         <div
-          className={`mt-4 min-h-[20rem] overflow-hidden rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${canvasFrameClass} ${shouldPreviewCanvasSize ? '' : 'flex-1'} ${tickClass}`}
-          style={
-            shouldPreviewCanvasSize
-              ? { width: previewW, height: previewH }
-              : undefined
-          }
+          className={`mt-4 min-h-[20rem] flex-none overflow-hidden rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${canvasFrameClass} ${tickClass}`}
+          style={plotFrameStyle}
         >
           <Plot
             className={`h-full w-full overflow-hidden ${tickClass}`}
@@ -1403,6 +1414,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           {formatRangeValue(xRange.min)}, {formatRangeValue(xRange.max)}], y=[
           {formatRangeValue(yRange.min)}, {formatRangeValue(yRange.max)}]
         </p>
+
+        {hasAnyPeaksForTable ? <PeaksListPanel /> : null}
       </div>
     </section>
   )

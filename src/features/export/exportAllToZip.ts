@@ -7,7 +7,7 @@ type ExportAllToZipOptions = {
   spectra: Spectrum[]
   delimiter: ';' | '\t'
   decimalComma: boolean
-  zipBaseName: string
+  zipFileName: string
 }
 
 function sanitizeName(rawName: string): string {
@@ -20,7 +20,7 @@ function sanitizeName(rawName: string): string {
 }
 
 export async function exportAllToZip(options: ExportAllToZipOptions) {
-  const { spectra, delimiter, decimalComma, zipBaseName } = options
+  const { spectra, delimiter, decimalComma, zipFileName } = options
   const zip = new JSZip()
   const usedNames = new Set<string>()
   const extension = delimiter === ';' ? 'csv' : 'tsv'
@@ -46,6 +46,5 @@ export async function exportAllToZip(options: ExportAllToZipOptions) {
   }
 
   const blob = await zip.generateAsync({ type: 'blob' })
-  const zipName = `${sanitizeName(zipBaseName)}.zip`
-  downloadBlobFile(zipName, blob, 'application/zip')
+  downloadBlobFile(zipFileName, blob, 'application/zip')
 }

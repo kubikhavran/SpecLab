@@ -15,12 +15,12 @@ import { useAppDispatch, useAppState } from '../app/state/AppStore'
 
 const sections = [
   'Data',
-  'Graf',
+  'Cosmic rays',
   'Baseline',
   'Smoothing',
-  'Graphics',
+  'Graf',
   'Peaks',
-  'Cosmic rays',
+  'Graphics',
   'Export',
   'Presets',
 ]

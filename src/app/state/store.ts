@@ -107,4 +107,7 @@ export const initialState: AppState = {
     plotCanvas: 'auto',
     previewCanvasSize: false,
   },
+  export: {
+    filename: '',
+  },
 }

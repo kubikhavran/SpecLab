@@ -2,8 +2,9 @@ import type { MutableRefObject } from 'react'
 import { useMemo, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout, PlotlyHTMLElement } from 'plotly.js'
-import { useAppState } from '../../app/state/AppStore'
+import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import { downloadTextFile } from '../../lib/downloadTextFile'
+import { getExportFilename } from './exportFilename'
 import {
   decodePlotlySvgDataUrl,
   downloadPngFromSvg,
@@ -35,6 +36,7 @@ type LooseAnnotation = Record<string, unknown> & {
   bgcolor?: unknown
   bordercolor?: unknown
   borderwidth?: unknown
+  showarrow?: unknown
 }
 
 type LooseLayout = {
@@ -65,16 +67,6 @@ type LooseSpectrumTrace = {
   mode?: unknown
   meta?: unknown
   line?: { width?: unknown }
-}
-
-function sanitizeFilename(rawName: string): string {
-  const cleaned = rawName
-    .trim()
-    .replace(/\s+/g, '_')
-    .replace(/[\\/]/g, '_')
-    .replace(/[<>:"|?*]/g, '')
-
-  return cleaned.length > 0 ? cleaned : 'plot'
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -198,7 +190,9 @@ async function withUniformExportLineWidths(
 }
 
 export function ExportPanel({ plotDivRef }: ExportPanelProps) {
-  const { spectra, activeSpectrumId, plot, graphics } = useAppState()
+  const { spectra, activeSpectrumId, plot, graphics, export: exportSettings } =
+    useAppState()
+  const dispatch = useAppDispatch()
   const [transparentBackground, setTransparentBackground] = useState(false)
   const [decimalComma, setDecimalComma] = useState(true)
   const [exportPreset, setExportPreset] = useState<ExportPreset>('screen')
@@ -218,14 +212,14 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         : spectra[0],
     [activeSpectrumId, spectra],
   )
-
-  const filename = sanitizeFilename(
-    plot.showAllSpectra
-      ? 'overlay'
-      : activeSpectrum !== undefined
-        ? activeSpectrum.name
-        : 'plot',
-  )
+  const defaultImageBase = plot.showAllSpectra
+    ? 'overlay'
+    : activeSpectrum !== undefined
+      ? activeSpectrum.name
+      : 'plot'
+  const defaultDataBase =
+    activeSpectrum !== undefined ? `${activeSpectrum.name}_data` : 'spectrum_data'
+  const defaultZipBase = plot.showAllSpectra ? 'overlay_all' : 'all_spectra'
 
   const isPlotReady = plotDivRef.current !== null
   const hasSpectra = spectra.length > 0
@@ -242,14 +236,18 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
       delimiter,
       decimalComma,
     })
-    const baseName = sanitizeFilename(activeSpectrum.name || 'spectrum')
     const extension = delimiter === ';' ? 'csv' : 'tsv'
     const mime =
       delimiter === ';'
         ? 'text/csv;charset=utf-8'
         : 'text/tab-separated-values;charset=utf-8'
+    const fileName = getExportFilename(
+      exportSettings.filename,
+      extension,
+      defaultDataBase,
+    )
 
-    downloadTextFile(`${baseName}_data.${extension}`, serialized, mime)
+    downloadTextFile(fileName, serialized, mime)
   }
 
   const exportAllData = async (delimiter: ';' | '\t') => {
@@ -261,7 +259,11 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
       spectra,
       delimiter,
       decimalComma,
-      zipBaseName: plot.showAllSpectra ? 'overlay_all' : 'all_spectra',
+      zipFileName: getExportFilename(
+        exportSettings.filename,
+        'zip',
+        defaultZipBase,
+      ),
     })
   }
 
@@ -402,12 +404,18 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
           exportPaperBg,
         )
         const inlineLabelBg = getInlineLabelBgColor(effectivePaperBg)
-        const exportAnnotations = currentAnnotations.map((annotation) => ({
-          ...annotation,
-          bgcolor: inlineLabelBg,
-          bordercolor: inlineLabelBg,
-          borderwidth: 0,
-        }))
+        const exportAnnotations = currentAnnotations.map((annotation) => {
+          if (annotation.showarrow === false) {
+            return {
+              ...annotation,
+              bgcolor: inlineLabelBg,
+              bordercolor: inlineLabelBg,
+              borderwidth: 0,
+            }
+          }
+
+          return { ...annotation }
+        })
 
         await Plotly.relayout(graphDiv, {
           annotations: exportAnnotations,
@@ -417,6 +425,12 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
       await Plotly.redraw(graphDiv)
 
       await withUniformExportLineWidths(graphDiv, async () => {
+        const exportFileName = getExportFilename(
+          exportSettings.filename,
+          format,
+          defaultImageBase,
+        )
+
         // Export pipeline: snapshot SVG first, patch tick styles in SVG, then output SVG/PNG.
         const rawSvgDataUrl = await Plotly.toImage(graphDiv, {
           format: 'svg',
@@ -431,11 +445,11 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         })
 
         if (format === 'svg') {
-          downloadSvg(patchedSvgText, `${filename}.svg`)
+          downloadSvg(patchedSvgText, exportFileName)
         } else {
           await downloadPngFromSvg({
             svgText: patchedSvgText,
-            filename: `${filename}.png`,
+            filename: exportFileName,
             width: exportW,
             height: exportH,
             scale: 2,
@@ -467,6 +481,22 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
 
   return (
     <div className="space-y-2">
+      <label className="block space-y-1">
+        <span className="text-xs text-slate-700">Filename</span>
+        <input
+          type="text"
+          className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+          placeholder="e.g., EC-SERS_2026-02-09"
+          value={exportSettings.filename}
+          onChange={(event) =>
+            dispatch({
+              type: 'EXPORT_SET',
+              patch: { filename: event.currentTarget.value },
+            })
+          }
+        />
+      </label>
+
       <label className="block space-y-1">
         <span className="text-xs text-slate-700">Export preset</span>
         <select

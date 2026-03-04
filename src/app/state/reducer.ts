@@ -3,6 +3,7 @@ import type {
   BaselineSettings,
   CosmicSettings,
   DataLabelingSettings,
+  ExportSettings,
   GraphicsSettings,
   Peak,
   PeaksSettings,
@@ -85,6 +86,7 @@ export type Action =
   | { type: 'PRESET_APPLY_SETTINGS'; id: string }
   | { type: 'PRESET_APPLY_ALL'; id: string }
   | { type: 'PLOT_SET'; patch: Partial<PlotSettings> }
+  | { type: 'EXPORT_SET'; patch: Partial<ExportSettings> }
   | { type: 'GRAPHICS_SET'; patch: Partial<GraphicsSettings> }
   | { type: 'COSMIC_SET'; patch: Partial<CosmicSettings> }
   | { type: 'COSMIC_MANUAL_SET'; enabled: boolean }
@@ -1083,6 +1085,14 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         plot: {
           ...state.plot,
+          ...action.patch,
+        },
+      }
+    case 'EXPORT_SET':
+      return {
+        ...state,
+        export: {
+          ...state.export,
           ...action.patch,
         },
       }
