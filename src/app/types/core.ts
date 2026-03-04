@@ -16,6 +16,7 @@ export interface PlotSettings {
   showAllSpectra: boolean
   reverseOverlayOrder: boolean
   stackOffset: number
+  uiRevision: number
   xMin?: number | null
   xMax?: number | null
   yMin?: number | null
@@ -43,6 +44,81 @@ export interface CosmicSettings {
   positiveOnly: boolean
   iterations: number
   manualEnabled: boolean
+}
+
+export type PeakKind = 'max' | 'min'
+export type PeakSource = 'auto' | 'manual'
+
+// Manual peaks store only X/index; Y is resolved from plotted data at render time.
+export type Peak = {
+  id: string
+  x: number
+  source: PeakSource
+  i?: number
+  kind?: PeakKind
+  prominence?: number
+  width?: number
+}
+
+export type PeaksSettings = {
+  enabled: boolean
+  mode: 'active' | 'all'
+  source: 'displayed' | 'processed'
+  useRegion: boolean
+  regionXMin: string
+  regionXMax: string
+  polarity: 'max' | 'min' | 'both'
+  minProminence: number
+  minDistance: number
+  maxPeaks: number
+  manualPickEnabled: boolean
+  showMarkers: boolean
+  showLabels: boolean
+  showLeaderLines: boolean
+  labelPlacement: 'leader'
+  labelAngleDeg: number
+  labelFontSize: number
+  labelBold: boolean
+  labelItalic: boolean
+  labelColorMode: 'trace' | 'custom'
+  labelColor: string
+  leaderColorMode: 'trace' | 'custom'
+  leaderColor: string
+  leaderLineWidth: number
+  decimals: number
+}
+
+export const DEFAULT_PEAKS_SETTINGS: PeaksSettings = {
+  enabled: false,
+  mode: 'active',
+  source: 'displayed',
+  useRegion: false,
+  regionXMin: '',
+  regionXMax: '',
+  polarity: 'max',
+  minProminence: 0,
+  minDistance: 10,
+  maxPeaks: 20,
+  manualPickEnabled: false,
+  showMarkers: true,
+  showLabels: true,
+  showLeaderLines: true,
+  labelPlacement: 'leader',
+  labelAngleDeg: -90,
+  labelFontSize: 24,
+  labelBold: false,
+  labelItalic: false,
+  labelColorMode: 'trace',
+  labelColor: '#111827',
+  leaderColorMode: 'trace',
+  leaderColor: '#111827',
+  leaderLineWidth: 1,
+  decimals: 0,
+}
+
+export type PeakLabelOffset = {
+  ax: number
+  ay: number
 }
 
 export type RenumberMode = 'index' | 'sequence' | 'extract'
@@ -101,6 +177,7 @@ export type PresetPayload = {
   smoothing: SmoothingSettings
   cosmic: CosmicSettings
   dataLabeling: DataLabelingSettings
+  peaksSettings?: PeaksSettings
 }
 
 export type Preset = {
@@ -178,6 +255,10 @@ export interface AppState {
   cosmicCleanYById: Record<string, number[]>
   manualCleanYById: Record<string, number[]>
   manualUndoStackById: Record<string, number[][]>
+  peaks: PeaksSettings
+  peaksAutoById: Record<string, Peak[]>
+  peaksManualById: Record<string, Peak[]>
+  peakLabelOffsetsById: Record<string, Record<string, PeakLabelOffset>>
   processedYById: Record<string, number[]>
   baselineYById: Record<string, number[]>
   smoothedYById: Record<string, number[]>

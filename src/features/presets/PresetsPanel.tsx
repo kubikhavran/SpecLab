@@ -1,15 +1,25 @@
-import type { KeyboardEvent } from 'react'
-import { useMemo, useState } from 'react'
+import type { ChangeEvent, KeyboardEvent } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import {
   DEFAULT_LABEL_EXTRACT_SETTINGS,
+  DEFAULT_PEAKS_SETTINGS,
   type DataLabelingSettings,
+  type PeaksSettings,
   type Preset,
+  type PlotSettings,
 } from '../../app/types/core'
 import { applyBaseline } from '../baseline/applyBaseline'
 import { aslsBaseline } from '../baseline/aslsBaseline'
 import { removeCosmicRays } from '../cosmic/removeCosmicRays'
 import { extractLabelFromFilename } from '../import/extractLabelFromFilename'
+import { detectPeaks } from '../peaks/detectPeaks'
+import {
+  exportPresetsToJsonFile,
+  parsePresetsFromFile,
+  PRESETS_FILE_NAME,
+  sanitizeFilename,
+} from './presetsStorage'
 import { savgolSmooth } from '../smoothing/savgol'
 
 const APPLY_ALL_YIELD_EVERY = 4
@@ -36,13 +46,77 @@ function resolveLabelExtractSettings(
   }
 }
 
+function createPeakId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `peak_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function createPresetId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `preset_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function resolveUniqueImportedName(
+  preferredName: string,
+  usedNames: Set<string>,
+): string {
+  const baseName = preferredName.trim() || 'Imported preset'
+  if (!usedNames.has(baseName)) {
+    usedNames.add(baseName)
+    return baseName
+  }
+
+  let index = 1
+  while (true) {
+    const suffix = index === 1 ? ' (imported)' : ` (imported ${index})`
+    const candidate = `${baseName}${suffix}`
+    if (!usedNames.has(candidate)) {
+      usedNames.add(candidate)
+      return candidate
+    }
+    index += 1
+  }
+}
+
+function parseFiniteNumber(value: string): number | undefined {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function resolveDetectionRange(
+  peaksSettings: PeaksSettings,
+  plotSettings: PlotSettings,
+): { xMin?: number; xMax?: number } {
+  if (!peaksSettings.useRegion) {
+    return {}
+  }
+
+  if (plotSettings.xMin != null && plotSettings.xMax != null) {
+    return { xMin: plotSettings.xMin, xMax: plotSettings.xMax }
+  }
+
+  return {
+    xMin: parseFiniteNumber(peaksSettings.regionXMin),
+    xMax: parseFiniteNumber(peaksSettings.regionXMax),
+  }
+}
+
 export function PresetsPanel() {
-  const { spectra, presets, activePresetId } = useAppState()
+  const { spectra, presets, activePresetId, activeSpectrumId } = useAppState()
   const dispatch = useAppDispatch()
   const [newPresetName, setNewPresetName] = useState('')
   const [renameId, setRenameId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [isApplyingAll, setIsApplyingAll] = useState(false)
+  const [importStatus, setImportStatus] = useState<string | null>(null)
+  const [importError, setImportError] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   const activePreset = useMemo(
     () => presets.find((preset) => preset.id === activePresetId) ?? null,
@@ -107,6 +181,85 @@ export function PresetsPanel() {
     }
   }
 
+  const handleExportPresets = (
+    presetsToExport: Preset[],
+    fileName: string = PRESETS_FILE_NAME,
+  ) => {
+    if (presetsToExport.length === 0) {
+      return
+    }
+
+    exportPresetsToJsonFile(presetsToExport, fileName)
+    setImportError(false)
+    setImportStatus(
+      `Exported ${presetsToExport.length} preset${
+        presetsToExport.length === 1 ? '' : 's'
+      }.`,
+    )
+  }
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+
+    if (!file) {
+      return
+    }
+
+    try {
+      const text = await file.text()
+      const importedCandidates = parsePresetsFromFile(text)
+      if (importedCandidates.length === 0) {
+        setImportError(true)
+        setImportStatus('No presets were imported.')
+        return
+      }
+
+      const usedIds = new Set(presets.map((preset) => preset.id))
+      const usedNames = new Set(presets.map((preset) => preset.name))
+      const now = Date.now()
+      const importedPresets: Preset[] = importedCandidates.map((candidate) => {
+        let nextId = candidate.id
+        while (usedIds.has(nextId)) {
+          nextId = createPresetId()
+        }
+        usedIds.add(nextId)
+
+        const nextName = resolveUniqueImportedName(candidate.name, usedNames)
+        const createdAt = Number.isFinite(candidate.createdAt)
+          ? Number(candidate.createdAt)
+          : now
+        const updatedAt = Number.isFinite(candidate.updatedAt)
+          ? Number(candidate.updatedAt)
+          : createdAt
+
+        return {
+          id: nextId,
+          name: nextName,
+          createdAt,
+          updatedAt,
+          payload: candidate.payload as Preset['payload'],
+        }
+      })
+
+      dispatch({
+        type: 'PRESETS_IMPORT',
+        presets: importedPresets,
+      })
+      setImportError(false)
+      setImportStatus(
+        `Imported: ${importedPresets.length} preset${
+          importedPresets.length === 1 ? '' : 's'
+        }.`,
+      )
+    } catch (error) {
+      setImportError(true)
+      const message =
+        error instanceof Error ? error.message : 'Failed to import presets.'
+      setImportStatus(message)
+    }
+  }
+
   const handleApplyAllSettings = async (preset: Preset) => {
     if (isApplyingAll) {
       return
@@ -120,6 +273,17 @@ export function PresetsPanel() {
       })
 
       const labelExtract = resolveLabelExtractSettings(preset.payload.dataLabeling)
+      const peaksSettings: PeaksSettings = {
+        ...DEFAULT_PEAKS_SETTINGS,
+        ...(preset.payload.peaksSettings ?? {}),
+        labelPlacement: 'leader',
+      }
+      const targetSpectrumIds =
+        peaksSettings.mode === 'all'
+          ? spectra.map((spectrum) => spectrum.id)
+          : [activeSpectrumId ?? spectra[0]?.id].filter(
+              (id): id is string => typeof id === 'string',
+            )
       for (let index = 0; index < spectra.length; index += 1) {
         const spectrum = spectra[index]
         const sourceName =
@@ -146,6 +310,9 @@ export function PresetsPanel() {
         smoothingSettings.polyOrder,
         smoothingSettings.window,
       )
+      const nextCosmicCleanYById: Record<string, number[]> = {}
+      const nextProcessedYById: Record<string, number[]> = {}
+      const nextSmoothedYById: Record<string, number[]> = {}
 
       for (let index = 0; index < spectra.length; index += 1) {
         const spectrum = spectra[index]
@@ -163,6 +330,7 @@ export function PresetsPanel() {
           yClean: cosmicResult.yClean,
           removedCount: cosmicResult.removedCount,
         })
+        nextCosmicCleanYById[spectrum.id] = cosmicResult.yClean
 
         const baselineY = aslsBaseline(
           cosmicResult.yClean,
@@ -178,6 +346,7 @@ export function PresetsPanel() {
           processedY,
           baselineY,
         })
+        nextProcessedYById[spectrum.id] = processedY
 
         const smoothedY = savgolSmooth(
           processedY,
@@ -189,6 +358,7 @@ export function PresetsPanel() {
           id: spectrum.id,
           smoothedY,
         })
+        nextSmoothedYById[spectrum.id] = smoothedY
 
         if ((index + 1) % APPLY_ALL_YIELD_EVERY === 0) {
           await yieldToMainThread()
@@ -203,6 +373,76 @@ export function PresetsPanel() {
         type: 'SMOOTHING_SET',
         patch: { polyOrder: clampedPolyOrder },
       })
+
+      dispatch({ type: 'PEAKS_LABEL_OFFSETS_RESET_ALL' })
+      for (const spectrum of spectra) {
+        dispatch({
+          type: 'PEAKS_SET_AUTO',
+          spectrumId: spectrum.id,
+          peaks: [],
+        })
+      }
+
+      if (!peaksSettings.enabled || targetSpectrumIds.length === 0) {
+        return
+      }
+
+      const { xMin, xMax } = resolveDetectionRange(
+        peaksSettings,
+        preset.payload.plot,
+      )
+      const detectionMinProminence = Math.max(0, peaksSettings.minProminence)
+      const detectionMinDistance = Math.max(0, peaksSettings.minDistance)
+      const detectionMaxPeaks = Math.max(1, Math.round(peaksSettings.maxPeaks))
+
+      for (let index = 0; index < targetSpectrumIds.length; index += 1) {
+        const spectrumId = targetSpectrumIds[index]
+        const spectrum = spectra.find((entry) => entry.id === spectrumId)
+        if (!spectrum) {
+          continue
+        }
+
+        const yUsed =
+          nextCosmicCleanYById[spectrum.id] ??
+          nextSmoothedYById[spectrum.id] ??
+          nextProcessedYById[spectrum.id] ??
+          spectrum.y
+        const pointCount = Math.min(spectrum.x.length, yUsed.length)
+        if (pointCount < 3) {
+          dispatch({
+            type: 'PEAKS_SET_AUTO',
+            spectrumId: spectrum.id,
+            peaks: [],
+          })
+          continue
+        }
+
+        const detectedPeaks = detectPeaks(
+          spectrum.x.slice(0, pointCount),
+          yUsed.slice(0, pointCount),
+          {
+            minProminence: detectionMinProminence,
+            minDistanceX: detectionMinDistance,
+            maxPeaks: detectionMaxPeaks,
+            xMin,
+            xMax,
+          },
+        )
+
+        dispatch({
+          type: 'PEAKS_SET_AUTO',
+          spectrumId: spectrum.id,
+          peaks: detectedPeaks.map((peak) => ({
+            id: createPeakId(),
+            x: peak.x,
+            source: 'auto' as const,
+          })),
+        })
+
+        if ((index + 1) % APPLY_ALL_YIELD_EVERY === 0) {
+          await yieldToMainThread()
+        }
+      }
     } finally {
       setIsApplyingAll(false)
     }
@@ -380,8 +620,61 @@ export function PresetsPanel() {
           Apply ALL settings
         </button>
       </div>
+      <div className="flex flex-wrap gap-1">
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
+          disabled={!activePreset || isApplyingAll}
+          onClick={() => {
+            if (!activePreset) {
+              return
+            }
+
+            handleExportPresets(
+              [activePreset],
+              `${sanitizeFilename(activePreset.name)}.json`,
+            )
+          }}
+        >
+          Export selected
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
+          disabled={presets.length === 0 || isApplyingAll}
+          onClick={() => handleExportPresets(presets)}
+        >
+          Export all
+        </button>
+        <button
+          type="button"
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
+          disabled={isApplyingAll}
+          onClick={() => importInputRef.current?.click()}
+        >
+          Import...
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={(event) => {
+            void handleImportFile(event)
+          }}
+        />
+      </div>
       {isApplyingAll ? (
         <p className="text-[11px] text-slate-500">Applying preset to all spectra...</p>
+      ) : null}
+      {importStatus ? (
+        <p
+          className={`text-[11px] ${
+            importError ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'
+          }`}
+        >
+          {importStatus}
+        </p>
       ) : null}
     </div>
   )

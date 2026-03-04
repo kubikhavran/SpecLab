@@ -4,6 +4,8 @@ import type {
   CosmicSettings,
   DataLabelingSettings,
   GraphicsSettings,
+  Peak,
+  PeaksSettings,
   Preset,
   PresetPayload,
   PlotSettings,
@@ -14,6 +16,7 @@ import type {
 import {
   DEFAULT_DATA_LABELING_SETTINGS,
   DEFAULT_LABEL_EXTRACT_SETTINGS,
+  DEFAULT_PEAKS_SETTINGS,
 } from '../types/core'
 import { extractLabelFromFilename } from '../../features/import/extractLabelFromFilename'
 
@@ -55,11 +58,29 @@ export type Action =
       suffix: string
     }
   | { type: 'DATA_LABELING_SET'; patch: Partial<DataLabelingSettings> }
+  | { type: 'PEAKS_SET'; patch: Partial<PeaksSettings> }
+  | { type: 'PEAKS_CLEAR_ACTIVE' }
+  | { type: 'PEAKS_CLEAR_ALL' }
+  | { type: 'PEAKS_SET_AUTO'; spectrumId: string; peaks: Peak[] }
+  | { type: 'PEAKS_SET_MANUAL'; spectrumId: string; peaks: Peak[] }
+  | { type: 'PEAKS_MANUAL_ADD'; spectrumId: string; x: number }
+  | { type: 'PEAKS_AUTO_DELETE'; spectrumId: string; peakId: string }
+  | { type: 'PEAKS_MANUAL_DELETE'; spectrumId: string; peakId: string }
+  | {
+      type: 'PEAKS_LABEL_OFFSET_SET'
+      spectrumId: string
+      peakId: string
+      ax: number
+      ay: number
+    }
+  | { type: 'PEAKS_LABEL_OFFSETS_RESET_ACTIVE' }
+  | { type: 'PEAKS_LABEL_OFFSETS_RESET_ALL' }
   | { type: 'PRESET_CREATE_FROM_CURRENT'; name: string }
   | { type: 'PRESET_DUPLICATE'; id: string }
   | { type: 'PRESET_DELETE'; id: string }
   | { type: 'PRESET_RENAME'; id: string; name: string }
   | { type: 'PRESET_SET_ACTIVE'; id: string | null }
+  | { type: 'PRESETS_IMPORT'; presets: Preset[] }
   | { type: 'PRESET_UPDATE_FROM_CURRENT'; id: string }
   | { type: 'PRESET_APPLY_SETTINGS'; id: string }
   | { type: 'PRESET_APPLY_ALL'; id: string }
@@ -165,6 +186,53 @@ function createPresetId(): string {
   }
 
   return `preset_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function createPeakId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `peak_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function prunePeakOffsetsForSpectrum(
+  peakLabelOffsetsById: AppState['peakLabelOffsetsById'],
+  spectrumId: string,
+  validPeakIds: Set<string>,
+): AppState['peakLabelOffsetsById'] {
+  const currentOffsets = peakLabelOffsetsById[spectrumId]
+  if (!currentOffsets) {
+    return peakLabelOffsetsById
+  }
+
+  let changed = false
+  const nextSpectrumOffsets: Record<string, { ax: number; ay: number }> = {}
+
+  for (const [peakId, offset] of Object.entries(currentOffsets)) {
+    if (!validPeakIds.has(peakId)) {
+      changed = true
+      continue
+    }
+    nextSpectrumOffsets[peakId] = offset
+  }
+
+  if (!changed) {
+    return peakLabelOffsetsById
+  }
+
+  const nextOffsets = { ...peakLabelOffsetsById }
+  if (Object.keys(nextSpectrumOffsets).length === 0) {
+    delete nextOffsets[spectrumId]
+  } else {
+    nextOffsets[spectrumId] = nextSpectrumOffsets
+  }
+
+  return nextOffsets
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 function asString(
@@ -273,6 +341,19 @@ function normalizeDataLabelingSettings(
   }
 }
 
+function normalizePeaksSettings(value: unknown): PeaksSettings {
+  if (typeof value !== 'object' || value === null) {
+    return { ...DEFAULT_PEAKS_SETTINGS }
+  }
+
+  return {
+    ...DEFAULT_PEAKS_SETTINGS,
+    ...(value as Partial<PeaksSettings>),
+    // Peaks UI supports leader labels only; normalize legacy preset values.
+    labelPlacement: 'leader',
+  }
+}
+
 function buildPresetPayload(state: AppState): PresetPayload {
   return {
     themeMode: state.themeMode,
@@ -282,6 +363,7 @@ function buildPresetPayload(state: AppState): PresetPayload {
     smoothing: { ...state.smoothing },
     cosmic: { ...state.cosmic },
     dataLabeling: normalizeDataLabelingSettings(state.dataLabeling),
+    peaksSettings: normalizePeaksSettings(state.peaks),
   }
 }
 
@@ -294,6 +376,74 @@ function clonePresetPayload(payload: PresetPayload): PresetPayload {
     smoothing: { ...payload.smoothing },
     cosmic: { ...payload.cosmic },
     dataLabeling: normalizeDataLabelingSettings(payload.dataLabeling),
+    peaksSettings: normalizePeaksSettings(payload.peaksSettings),
+  }
+}
+
+function normalizePresetPayloadFromUnknown(
+  value: unknown,
+  fallbackState: AppState,
+): PresetPayload {
+  const source = isObject(value) ? value : {}
+
+  const themeMode =
+    source.themeMode === 'system' ||
+    source.themeMode === 'light' ||
+    source.themeMode === 'dark'
+      ? source.themeMode
+      : fallbackState.themeMode
+
+  const plot =
+    isObject(source.plot)
+      ? {
+          ...fallbackState.plot,
+          ...(source.plot as Partial<PlotSettings>),
+        }
+      : { ...fallbackState.plot }
+  const graphics =
+    isObject(source.graphics)
+      ? {
+          ...fallbackState.graphics,
+          ...(source.graphics as Partial<GraphicsSettings>),
+        }
+      : { ...fallbackState.graphics }
+  const baseline =
+    isObject(source.baseline)
+      ? {
+          ...fallbackState.baseline,
+          ...(source.baseline as Partial<BaselineSettings>),
+        }
+      : { ...fallbackState.baseline }
+  const smoothing =
+    isObject(source.smoothing)
+      ? {
+          ...fallbackState.smoothing,
+          ...(source.smoothing as Partial<SmoothingSettings>),
+        }
+      : { ...fallbackState.smoothing }
+  const cosmic =
+    isObject(source.cosmic)
+      ? {
+          ...fallbackState.cosmic,
+          ...(source.cosmic as Partial<CosmicSettings>),
+        }
+      : { ...fallbackState.cosmic }
+  const dataLabeling = normalizeDataLabelingSettings(
+    source.dataLabeling ?? fallbackState.dataLabeling,
+  )
+  const peaksSettings = normalizePeaksSettings(
+    source.peaksSettings ?? fallbackState.peaks,
+  )
+
+  return {
+    themeMode,
+    plot,
+    graphics,
+    baseline,
+    smoothing,
+    cosmic,
+    dataLabeling,
+    peaksSettings,
   }
 }
 
@@ -553,8 +703,198 @@ export function reducer(state: AppState, action: Action): AppState {
                   ...action.patch.labelExtract,
                 },
               }
-            : {}),
+          : {}),
         },
+      }
+    case 'PEAKS_SET':
+      return {
+        ...state,
+        peaks: {
+          ...state.peaks,
+          ...action.patch,
+          // Peaks UI now supports leader labels only; normalize legacy values.
+          labelPlacement: 'leader',
+        },
+      }
+    case 'PEAKS_CLEAR_ACTIVE': {
+      if (!state.activeSpectrumId) {
+        return state
+      }
+
+      const nextAuto = { ...state.peaksAutoById }
+      const nextManual = { ...state.peaksManualById }
+      const nextOffsets = { ...state.peakLabelOffsetsById }
+      delete nextAuto[state.activeSpectrumId]
+      delete nextManual[state.activeSpectrumId]
+      delete nextOffsets[state.activeSpectrumId]
+
+      return {
+        ...state,
+        peaksAutoById: nextAuto,
+        peaksManualById: nextManual,
+        peakLabelOffsetsById: nextOffsets,
+      }
+    }
+    case 'PEAKS_CLEAR_ALL':
+      return {
+        ...state,
+        peaksAutoById: {},
+        peaksManualById: {},
+        peakLabelOffsetsById: {},
+      }
+    case 'PEAKS_SET_AUTO':
+      {
+        const nextAutoPeaks = action.peaks.slice()
+        const currentManualPeaks = state.peaksManualById[action.spectrumId] ?? []
+        const validPeakIds = new Set<string>(
+          [...nextAutoPeaks, ...currentManualPeaks].map((peak) => peak.id),
+        )
+        const nextOffsets = prunePeakOffsetsForSpectrum(
+          state.peakLabelOffsetsById,
+          action.spectrumId,
+          validPeakIds,
+        )
+
+        return {
+          ...state,
+          peaksAutoById: {
+            ...state.peaksAutoById,
+            [action.spectrumId]: nextAutoPeaks,
+          },
+          peakLabelOffsetsById: nextOffsets,
+        }
+      }
+    case 'PEAKS_SET_MANUAL':
+      {
+        const nextManualPeaks = action.peaks.slice()
+        const currentAutoPeaks = state.peaksAutoById[action.spectrumId] ?? []
+        const validPeakIds = new Set<string>(
+          [...currentAutoPeaks, ...nextManualPeaks].map((peak) => peak.id),
+        )
+        const nextOffsets = prunePeakOffsetsForSpectrum(
+          state.peakLabelOffsetsById,
+          action.spectrumId,
+          validPeakIds,
+        )
+
+        return {
+          ...state,
+          peaksManualById: {
+            ...state.peaksManualById,
+            [action.spectrumId]: nextManualPeaks,
+          },
+          peakLabelOffsetsById: nextOffsets,
+        }
+      }
+    case 'PEAKS_MANUAL_ADD': {
+      const currentManual = state.peaksManualById[action.spectrumId] ?? []
+      const manualPeak: Peak = {
+        id: createPeakId(),
+        x: action.x,
+        source: 'manual',
+      }
+
+      return {
+        ...state,
+        peaksManualById: {
+          ...state.peaksManualById,
+          [action.spectrumId]: [...currentManual, manualPeak],
+        },
+      }
+    }
+    case 'PEAKS_AUTO_DELETE': {
+      const currentAuto = state.peaksAutoById[action.spectrumId] ?? []
+      const nextAuto = currentAuto.filter((peak) => peak.id !== action.peakId)
+      if (nextAuto.length === currentAuto.length) {
+        return state
+      }
+
+      const currentOffsets = state.peakLabelOffsetsById[action.spectrumId] ?? {}
+      const nextOffsetsForSpectrum = { ...currentOffsets }
+      delete nextOffsetsForSpectrum[action.peakId]
+
+      return {
+        ...state,
+        peaksAutoById: {
+          ...state.peaksAutoById,
+          [action.spectrumId]: nextAuto,
+        },
+        peakLabelOffsetsById: {
+          ...state.peakLabelOffsetsById,
+          [action.spectrumId]: nextOffsetsForSpectrum,
+        },
+      }
+    }
+    case 'PEAKS_MANUAL_DELETE': {
+      const currentManual = state.peaksManualById[action.spectrumId] ?? []
+      const nextManual = currentManual.filter((peak) => peak.id !== action.peakId)
+      if (nextManual.length === currentManual.length) {
+        return state
+      }
+
+      const currentOffsets = state.peakLabelOffsetsById[action.spectrumId] ?? {}
+      const nextOffsetsForSpectrum = { ...currentOffsets }
+      delete nextOffsetsForSpectrum[action.peakId]
+
+      return {
+        ...state,
+        peaksManualById: {
+          ...state.peaksManualById,
+          [action.spectrumId]: nextManual,
+        },
+        peakLabelOffsetsById: {
+          ...state.peakLabelOffsetsById,
+          [action.spectrumId]: nextOffsetsForSpectrum,
+        },
+      }
+    }
+    case 'PEAKS_LABEL_OFFSET_SET': {
+      if (!Number.isFinite(action.ax) || !Number.isFinite(action.ay)) {
+        return state
+      }
+
+      const currentSpectrumOffsets =
+        state.peakLabelOffsetsById[action.spectrumId] ?? {}
+      const currentOffset = currentSpectrumOffsets[action.peakId]
+      if (
+        currentOffset &&
+        currentOffset.ax === action.ax &&
+        currentOffset.ay === action.ay
+      ) {
+        return state
+      }
+
+      return {
+        ...state,
+        peakLabelOffsetsById: {
+          ...state.peakLabelOffsetsById,
+          [action.spectrumId]: {
+            ...currentSpectrumOffsets,
+            [action.peakId]: {
+              ax: action.ax,
+              ay: action.ay,
+            },
+          },
+        },
+      }
+    }
+    case 'PEAKS_LABEL_OFFSETS_RESET_ACTIVE': {
+      if (!state.activeSpectrumId) {
+        return state
+      }
+
+      const nextOffsets = { ...state.peakLabelOffsetsById }
+      delete nextOffsets[state.activeSpectrumId]
+
+      return {
+        ...state,
+        peakLabelOffsetsById: nextOffsets,
+      }
+    }
+    case 'PEAKS_LABEL_OFFSETS_RESET_ALL':
+      return {
+        ...state,
+        peakLabelOffsetsById: {},
       }
     case 'PRESET_CREATE_FROM_CURRENT': {
       const now = Date.now()
@@ -640,16 +980,21 @@ export function reducer(state: AppState, action: Action): AppState {
       }
 
       const payload = clonePresetPayload(preset.payload)
+      const nextPlot = {
+        ...payload.plot,
+        uiRevision: payload.plot.uiRevision ?? state.plot.uiRevision ?? 1,
+      }
       return {
         ...state,
         activePresetId: preset.id,
         themeMode: payload.themeMode,
-        plot: payload.plot,
+        plot: nextPlot,
         graphics: payload.graphics,
         baseline: payload.baseline,
         smoothing: payload.smoothing,
         cosmic: payload.cosmic,
         dataLabeling: payload.dataLabeling,
+        peaks: normalizePeaksSettings(payload.peaksSettings),
       }
     }
     case 'PRESET_APPLY_ALL':
@@ -669,6 +1014,50 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activePresetId: action.id,
+      }
+    }
+    case 'PRESETS_IMPORT': {
+      if (action.presets.length === 0) {
+        return state
+      }
+
+      const importedPresets: Preset[] = action.presets
+        .filter(
+          (preset): preset is Preset =>
+            typeof preset.id === 'string' &&
+            preset.id.length > 0 &&
+            typeof preset.name === 'string' &&
+            preset.name.trim().length > 0,
+        )
+        .map((preset) => {
+          const now = Date.now()
+          const createdAt = Number.isFinite(preset.createdAt)
+            ? Number(preset.createdAt)
+            : now
+          const updatedAt = Number.isFinite(preset.updatedAt)
+            ? Number(preset.updatedAt)
+            : createdAt
+
+          return {
+            id: preset.id,
+            name: preset.name.trim(),
+            createdAt,
+            updatedAt,
+            payload: normalizePresetPayloadFromUnknown(
+              (preset as { payload?: unknown }).payload,
+              state,
+            ),
+          }
+        })
+
+      if (importedPresets.length === 0) {
+        return state
+      }
+
+      return {
+        ...state,
+        presets: [...state.presets, ...importedPresets],
+        activePresetId: state.activePresetId ?? importedPresets[0].id,
       }
     }
     case 'PRESET_UPDATE_FROM_CURRENT': {

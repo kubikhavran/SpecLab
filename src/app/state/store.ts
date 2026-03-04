@@ -1,5 +1,6 @@
 import {
   DEFAULT_DATA_LABELING_SETTINGS,
+  DEFAULT_PEAKS_SETTINGS,
   type AppState,
   type ThemeMode,
 } from '../types/core'
@@ -38,6 +39,7 @@ export const initialState: AppState = {
     showAllSpectra: false,
     reverseOverlayOrder: false,
     stackOffset: 0,
+    uiRevision: 1,
     xMin: null,
     xMax: null,
     yMin: null,
@@ -49,6 +51,10 @@ export const initialState: AppState = {
   cosmicCleanYById: {},
   manualCleanYById: {},
   manualUndoStackById: {},
+  peaks: { ...DEFAULT_PEAKS_SETTINGS },
+  peaksAutoById: {},
+  peaksManualById: {},
+  peakLabelOffsetsById: {},
   processedYById: {},
   baselineYById: {},
   smoothedYById: {},

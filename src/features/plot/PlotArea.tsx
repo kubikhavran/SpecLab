@@ -1,4 +1,11 @@
-import { useEffect, type MutableRefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
 import type {
@@ -9,7 +16,7 @@ import type {
   PlotMouseEvent,
 } from 'plotly.js'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
-import type { Spectrum } from '../../app/types/core'
+import type { Peak, Spectrum } from '../../app/types/core'
 import { getPaletteColors } from '../graphics/palettes'
 import { applyTickTextInlineStyles } from './tickTextStyles'
 
@@ -45,6 +52,17 @@ type PlotAreaProps = {
 type SpectrumTraceMeta = {
   spectrumId: string
   isSpectrum: true
+}
+
+type PeakAnnotationBinding = {
+  spectrumId: string
+  peakId: string
+  source: 'auto' | 'manual'
+}
+
+type PeakLabelOffsetDraft = {
+  ax?: number
+  ay?: number
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -235,19 +253,216 @@ function toSeries(
   }
 }
 
+function resolvePeakIndex(xValues: number[], peak: Peak): number | null {
+  if (xValues.length === 0) {
+    return null
+  }
+
+  const candidateIndex = peak.i
+  if (
+    typeof candidateIndex === 'number' &&
+    Number.isInteger(candidateIndex) &&
+    candidateIndex >= 0 &&
+    candidateIndex < xValues.length
+  ) {
+    return candidateIndex
+  }
+
+  let bestIndex = 0
+  let bestDistance = Math.abs(xValues[0] - peak.x)
+  for (let i = 1; i < xValues.length; i += 1) {
+    const distance = Math.abs(xValues[i] - peak.x)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestIndex = i
+    }
+  }
+
+  return bestIndex
+}
+
+function interpolateYAtX(
+  xValues: number[],
+  yValues: number[],
+  xTarget: number,
+): number | null {
+  const pointCount = Math.min(xValues.length, yValues.length)
+  if (pointCount === 0) {
+    return null
+  }
+
+  if (pointCount === 1) {
+    return yValues[0]
+  }
+
+  const firstX = xValues[0]
+  const lastX = xValues[pointCount - 1]
+  const isAscending = lastX >= firstX
+
+  if (isAscending) {
+    if (xTarget <= firstX) {
+      return yValues[0]
+    }
+    if (xTarget >= lastX) {
+      return yValues[pointCount - 1]
+    }
+  } else {
+    if (xTarget >= firstX) {
+      return yValues[0]
+    }
+    if (xTarget <= lastX) {
+      return yValues[pointCount - 1]
+    }
+  }
+
+  let low = 0
+  let high = pointCount - 1
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2)
+    const xMid = xValues[mid]
+    if ((isAscending && xMid <= xTarget) || (!isAscending && xMid >= xTarget)) {
+      low = mid
+    } else {
+      high = mid
+    }
+  }
+
+  const x0 = xValues[low]
+  const x1 = xValues[high]
+  const y0 = yValues[low]
+  const y1 = yValues[high]
+
+  if (!Number.isFinite(x0) || !Number.isFinite(x1) || x1 === x0) {
+    return y0
+  }
+
+  const t = (xTarget - x0) / (x1 - x0)
+  return y0 + t * (y1 - y0)
+}
+
+function parseRegionBound(value: string): number | null {
+  const parsed = Number(value.trim())
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function parseAnnotationOffsetUpdates(
+  relayout: Readonly<Record<string, unknown>>,
+): Map<number, PeakLabelOffsetDraft> {
+  const updatesByIndex = new Map<number, PeakLabelOffsetDraft>()
+  const upsert = (index: number, axis: 'ax' | 'ay', value: unknown) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) {
+      return
+    }
+
+    const existing = updatesByIndex.get(index) ?? {}
+    existing[axis] = numericValue
+    updatesByIndex.set(index, existing)
+  }
+
+  for (const [key, value] of Object.entries(relayout)) {
+    const match = key.match(/^annotations\[(\d+)\]\.(ax|ay)$/)
+    if (match) {
+      upsert(Number(match[1]), match[2] as 'ax' | 'ay', value)
+      continue
+    }
+
+    const fullAnnotationMatch = key.match(/^annotations\[(\d+)\]$/)
+    if (
+      fullAnnotationMatch &&
+      typeof value === 'object' &&
+      value !== null &&
+      ('ax' in value || 'ay' in value)
+    ) {
+      const index = Number(fullAnnotationMatch[1])
+      const annotationPatch = value as { ax?: unknown; ay?: unknown }
+      if (annotationPatch.ax !== undefined) {
+        upsert(index, 'ax', annotationPatch.ax)
+      }
+      if (annotationPatch.ay !== undefined) {
+        upsert(index, 'ay', annotationPatch.ay)
+      }
+    }
+  }
+
+  return updatesByIndex
+}
+
+function parseAnnotationTextClears(
+  relayout: Readonly<Record<string, unknown>>,
+): Set<number> {
+  const clearedIndexes = new Set<number>()
+
+  for (const [key, value] of Object.entries(relayout)) {
+    const textMatch = key.match(/^annotations\[(\d+)\]\.text$/)
+    if (textMatch) {
+      if (value === '' || value === null) {
+        clearedIndexes.add(Number(textMatch[1]))
+      }
+      continue
+    }
+
+    const fullAnnotationMatch = key.match(/^annotations\[(\d+)\]$/)
+    if (!fullAnnotationMatch) {
+      continue
+    }
+
+    const index = Number(fullAnnotationMatch[1])
+    if (value === null) {
+      clearedIndexes.add(index)
+      continue
+    }
+
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'text' in value &&
+      ((value as { text?: unknown }).text === '' ||
+        (value as { text?: unknown }).text === null)
+    ) {
+      clearedIndexes.add(index)
+    }
+  }
+
+  return clearedIndexes
+}
+
+function isElement(value: unknown): value is Element {
+  return typeof Element !== 'undefined' && value instanceof Element
+}
+
+function isAnnotationClickTarget(target: EventTarget | null | undefined): boolean {
+  if (!isElement(target)) {
+    return false
+  }
+
+  // Plotly annotation text/arrow groups are rendered under .annotation in SVG layers.
+  return target.closest('.annotation') !== null
+}
+
 export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const {
     spectra,
     activeSpectrumId,
     plot,
     graphics,
+    peaks,
+    peaksAutoById,
+    peaksManualById,
+    peakLabelOffsetsById,
     baseline,
     cosmicCleanYById,
+    manualCleanYById,
     processedYById,
     baselineYById,
     smoothedYById,
   } = useAppState()
   const dispatch = useAppDispatch()
+  const annotationIndexMapRef = useRef<Record<number, PeakAnnotationBinding>>({})
+  const [selectedPeak, setSelectedPeak] = useState<PeakAnnotationBinding | null>(
+    null,
+  )
+  const shiftDownRef = useRef(false)
   const spectrumIds = new Set(spectra.map((spectrum) => spectrum.id))
 
   const resolvedActiveSpectrum =
@@ -279,6 +494,39 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const previewW = clampInt(Math.round(graphics.exportWidth), 300, 8000)
   const previewH = clampInt(Math.round(graphics.exportHeight), 300, 8000)
   const shouldPreviewCanvasSize = graphics.previewCanvasSize
+  const uiRevision = plot.uiRevision ?? 1
+  const editRevision = useMemo(() => {
+    const serializePeaks = (records: Record<string, Peak[]>) =>
+      Object.entries(records)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([spectrumId, spectrumPeaks]) =>
+          `${spectrumId}:${spectrumPeaks.map((peak) => peak.id).join(',')}`,
+        )
+        .join('|')
+
+    const serializeOffsets = (
+      records: Record<string, Record<string, { ax: number; ay: number }>>,
+    ) =>
+      Object.entries(records)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([spectrumId, spectrumOffsets]) => {
+          const serializedSpectrumOffsets = Object.entries(spectrumOffsets)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(
+              ([peakId, offset]) =>
+                `${peakId}:${Math.round(offset.ax * 1000) / 1000},${
+                  Math.round(offset.ay * 1000) / 1000
+                }`,
+            )
+            .join(';')
+          return `${spectrumId}:${serializedSpectrumOffsets}`
+        })
+        .join('|')
+
+    return `auto:${serializePeaks(peaksAutoById)}|manual:${serializePeaks(
+      peaksManualById,
+    )}|offsets:${serializeOffsets(peakLabelOffsetsById)}`
+  }, [peakLabelOffsetsById, peaksAutoById, peaksManualById])
   const titleStandoff = shouldPreviewCanvasSize
     ? Math.max(12, Math.round(graphics.baseFontSize * 0.9))
     : Math.max(8, Math.round(graphics.baseFontSize * 0.8))
@@ -293,7 +541,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       ? plottedSpectra.map((spectrum, index) => {
           const yRawOrCosmic = cosmicCleanYById[spectrum.id] ?? spectrum.y
           const yBase = processedYById[spectrum.id] ?? yRawOrCosmic
-          const yToPlot = smoothedYById[spectrum.id] ?? yBase
+          const ySmoothed = smoothedYById[spectrum.id] ?? yBase
+          const yToPlot = manualCleanYById[spectrum.id] ?? ySmoothed
 
           return toSeries(
             spectrum,
@@ -311,8 +560,194 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             isActive: false,
           },
         ]
+  const allX = series.flatMap((entry) => entry.x)
+  const allY = series.flatMap((entry) => entry.y)
+  const xRange = getRange(allX)
+  const yRange = getRange(allY)
+  const hasXRange = plot.xMin != null && plot.xMax != null
   const primaryTraceCount = series.length
   const paletteColors = getPaletteColors(graphics.palette, primaryTraceCount)
+  const getSpectrumColor = (spectrumId: string): string => {
+    const seriesIndex = series.findIndex((entry) => entry.id === spectrumId)
+    if (seriesIndex < 0) {
+      return '#ef4444'
+    }
+
+    if (paletteColors !== null && paletteColors.length > 0) {
+      return (
+        paletteColors[seriesIndex] ??
+        paletteColors[seriesIndex % paletteColors.length]
+      )
+    }
+
+    return DEFAULT_COLORWAY[seriesIndex % DEFAULT_COLORWAY.length]
+  }
+  const peaksEnabled = peaks.enabled
+  const peakSpectrumIds =
+    !peaksEnabled
+      ? []
+      : peaks.mode === 'active'
+        ? resolvedActiveId
+          ? [resolvedActiveId]
+          : []
+        : plottedSpectra.map((spectrum) => spectrum.id)
+  const regionMinInput = parseRegionBound(peaks.regionXMin)
+  const regionMaxInput = parseRegionBound(peaks.regionXMax)
+  const hasRegionFilter =
+    peaks.useRegion &&
+    regionMinInput !== null &&
+    regionMaxInput !== null
+  const regionMin = hasRegionFilter
+    ? Math.min(regionMinInput, regionMaxInput)
+    : Number.NaN
+  const regionMax = hasRegionFilter
+    ? Math.max(regionMinInput, regionMaxInput)
+    : Number.NaN
+  const peakDecimals = Math.max(0, Math.round(peaks.decimals))
+  const peakMarkerX: number[] = []
+  const peakMarkerY: number[] = []
+  const peakMarkerText: string[] = []
+  const peakAnnotations: NonNullable<Layout['annotations']> = []
+  const peakAnnotationBindings: PeakAnnotationBinding[] = []
+
+  for (const spectrumId of peakSpectrumIds) {
+    const spectrum = plottedSpectra.find((entry) => entry.id === spectrumId)
+    if (!spectrum) {
+      continue
+    }
+
+    const yRawOrCosmic = cosmicCleanYById[spectrum.id] ?? spectrum.y
+    const yBaseline = processedYById[spectrum.id] ?? yRawOrCosmic
+    const ySmoothed = smoothedYById[spectrum.id] ?? yBaseline
+    const yDisplayed = manualCleanYById[spectrum.id] ?? ySmoothed
+    const yProcessed = processedYById[spectrum.id]
+    const offset =
+      overlayMode
+        ? plottedSpectra.findIndex((entry) => entry.id === spectrum.id) *
+          plot.stackOffset
+        : 0
+
+    const pointCount = Math.min(spectrum.x.length, yDisplayed.length)
+    if (pointCount <= 0) {
+      continue
+    }
+
+    const xSource = spectrum.x.slice(0, pointCount)
+    const yDisplayedSource = yDisplayed
+      .slice(0, pointCount)
+      .map((value) => value + offset)
+    const yProcessedSource =
+      Array.isArray(yProcessed) && yProcessed.length > 0
+        ? yProcessed
+            .slice(0, Math.min(spectrum.x.length, yProcessed.length))
+            .map((value) => value + offset)
+        : yDisplayedSource
+    const ySource =
+      peaks.source === 'processed'
+        ? yProcessedSource
+        : yDisplayedSource
+    const spectrumColor = getSpectrumColor(spectrum.id)
+    const sourceCount = Math.min(xSource.length, ySource.length)
+    const xForSource = xSource.slice(0, sourceCount)
+    const yForSource = ySource.slice(0, sourceCount)
+    const peaksForId = [
+      ...(peaksAutoById[spectrum.id] ?? []),
+      ...(peaksManualById[spectrum.id] ?? []),
+    ]
+
+    for (const peak of peaksForId) {
+      let xValue = Number.NaN
+      let yValue = Number.NaN
+
+      if (peak.source === 'manual') {
+        xValue = peak.x
+        const interpolatedY = interpolateYAtX(xForSource, yForSource, xValue)
+        yValue = interpolatedY ?? Number.NaN
+      } else {
+        const peakIndex = resolvePeakIndex(xForSource, peak)
+        if (peakIndex === null || peakIndex >= sourceCount) {
+          continue
+        }
+        xValue = xForSource[peakIndex]
+        yValue = yForSource[peakIndex]
+      }
+
+      if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) {
+        continue
+      }
+
+      if (hasRegionFilter && (xValue < regionMin || xValue > regionMax)) {
+        continue
+      }
+
+      const label = xValue.toFixed(peakDecimals)
+      const styledLabel = styleText(label, peaks.labelBold, peaks.labelItalic)
+      const effectiveLabelColor =
+        peaks.labelColorMode === 'trace'
+          ? spectrumColor
+          : peaks.labelColor || '#111827'
+      const effectiveLeaderColor =
+        peaks.leaderColorMode === 'trace'
+          ? spectrumColor
+          : peaks.leaderColor || '#111827'
+      const effectiveLeaderLineColor = peaks.showLeaderLines
+        ? effectiveLeaderColor
+        : 'rgba(0,0,0,0)'
+      const effectiveLeaderLineWidth = peaks.showLeaderLines
+        ? Math.max(1, Math.min(6, peaks.leaderLineWidth))
+        : 0.01
+
+      if (peaks.showMarkers) {
+        peakMarkerX.push(xValue)
+        peakMarkerY.push(yValue)
+        peakMarkerText.push(label)
+      }
+
+      if (peaks.showLabels) {
+        const offset = peakLabelOffsetsById[spectrum.id]?.[peak.id] ?? {
+          ax: 0,
+          ay: -40,
+        }
+        const isSelectedPeak =
+          selectedPeak?.spectrumId === spectrum.id &&
+          selectedPeak.peakId === peak.id
+
+        peakAnnotations.push({
+          x: xValue,
+          y: yValue,
+          xref: 'x',
+          yref: 'y',
+          text: styledLabel,
+          textangle: `${peaks.labelAngleDeg}`,
+          showarrow: true,
+          arrowhead: 0,
+          arrowwidth: effectiveLeaderLineWidth,
+          arrowcolor: effectiveLeaderLineColor,
+          ax: offset.ax,
+          ay: offset.ay,
+          axref: 'pixel',
+          ayref: 'pixel',
+          captureevents: true,
+          xanchor: 'center',
+          yanchor: 'middle',
+          font: {
+            color: effectiveLabelColor,
+            size: peaks.labelFontSize,
+          },
+          bgcolor: isSelectedPeak
+            ? 'rgba(248,250,252,0.92)'
+            : 'rgba(0,0,0,0)',
+          bordercolor: isSelectedPeak ? spectrumColor : 'rgba(0,0,0,0)',
+          borderwidth: isSelectedPeak ? 1 : 0,
+        })
+        peakAnnotationBindings.push({
+          spectrumId: spectrum.id,
+          peakId: peak.id,
+          source: peak.source,
+        })
+      }
+    }
+  }
 
   const primaryTraces: Data[] = series.map((entry, index) => {
     const isSpectrumTrace = spectrumIds.has(entry.id)
@@ -373,14 +808,32 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           hovertemplate: `baseline<br>x: %{x}<br>y: %{y}<extra></extra>`,
         }
       : null
-  const traces: Data[] =
-    baselineTrace !== null
-      ? [...primaryTraces, baselineTrace]
-      : primaryTraces
+  const peakMarkerTrace: Data | null =
+    peaksEnabled && peaks.showMarkers && peakMarkerX.length > 0
+      ? {
+          type: 'scatter',
+          mode: 'markers',
+          name: 'Peaks',
+          x: peakMarkerX,
+          y: peakMarkerY,
+          text: peakMarkerText,
+          showlegend: false,
+          marker: {
+            size: 7,
+            color: '#ef4444',
+            symbol: 'circle',
+          },
+          hovertemplate: 'Peak x: %{x}<br>y: %{y}<extra></extra>',
+        }
+      : null
+  const traces: Data[] = [
+    ...primaryTraces,
+    ...(peakMarkerTrace !== null ? [peakMarkerTrace] : []),
+    ...(baselineTrace !== null ? [baselineTrace] : []),
+  ]
   const plotCanvasMode = graphics.plotCanvas ?? 'auto'
   const canvasColor = getCanvasColor(plotCanvasMode)
   const canvasFrameClass = getCanvasFrameClass(plotCanvasMode)
-  const hasXRange = plot.xMin != null && plot.xMax != null
   const inlineLabelBgColor = getInlineLabelBgColor(canvasColor)
   const inlineAnnotations: NonNullable<Layout['annotations']> = useInlineLabels
     ? series
@@ -443,11 +896,10 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         })
         .filter((annotation): annotation is NonNullable<typeof annotation> => annotation !== null)
     : []
-
-  const allX = series.flatMap((entry) => entry.x)
-  const allY = series.flatMap((entry) => entry.y)
-  const xRange = getRange(allX)
-  const yRange = getRange(allY)
+  const mergedAnnotations: NonNullable<Layout['annotations']> = [
+    ...inlineAnnotations,
+    ...peakAnnotations,
+  ]
   const hasYRange = plot.yMin != null && plot.yMax != null
   const showXMarks = graphics.showXTickLabels && graphics.showXTickMarks
   const showYMarks = graphics.showYTickLabels && graphics.showYTickMarks
@@ -463,6 +915,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       axisLabelItalic: graphics.axisLabelItalic,
     },
   )
+  const leaderLabelsActive =
+    peaks.enabled && peaks.showLabels
   const tickClass = [
     'speclab-plot',
     graphics.tickLabelBold ? 'speclab-tick-bold' : '',
@@ -480,6 +934,18 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     const clickedSpectrumId = points.reduce<string | null>((found, point) => {
       if (found) {
         return found
+      }
+
+      const curveNumber = Number(point.curveNumber)
+      if (
+        Number.isInteger(curveNumber) &&
+        curveNumber >= 0 &&
+        curveNumber < series.length
+      ) {
+        const fromSeries = series[curveNumber]?.id
+        if (typeof fromSeries === 'string' && spectrumIds.has(fromSeries)) {
+          return fromSeries
+        }
       }
 
       const pointData = point.data as unknown as { meta?: unknown } | undefined
@@ -507,15 +973,257 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       return
     }
 
-    if (clickedSpectrumId === activeSpectrumId) {
+    if (clickedSpectrumId !== activeSpectrumId) {
+      dispatch({
+        type: 'SPECTRUM_SET_ACTIVE',
+        id: clickedSpectrumId,
+      })
+    }
+
+    if (!peaks.enabled || !peaks.manualPickEnabled) {
+      return
+    }
+
+    const mouseEvent = (event as unknown as { event?: MouseEvent }).event
+    if (isAnnotationClickTarget(mouseEvent?.target ?? null)) {
+      return
+    }
+
+    const graphDiv = plotDivRef.current as
+      | (PlotlyHTMLElement & {
+          _fullLayout?: {
+            xaxis?: {
+              _offset?: number
+              _length?: number
+              p2l?: (xPixel: number) => unknown
+              l2d?: (xLinear: number) => unknown
+            }
+          }
+        })
+      | null
+
+    let clickedX = Number.NaN
+    const fullLayout = graphDiv?._fullLayout
+    const xAxis = fullLayout?.xaxis
+    if (graphDiv && xAxis && mouseEvent) {
+      const rect = graphDiv.getBoundingClientRect()
+      const xOffset = Number.isFinite(Number(xAxis._offset))
+        ? Number(xAxis._offset)
+        : 0
+      const xLengthRaw = Number(xAxis._length)
+      const hasLength = Number.isFinite(xLengthRaw) && xLengthRaw > 0
+      const pxRaw = mouseEvent.clientX - rect.left - xOffset
+      const px = hasLength
+        ? Math.max(0, Math.min(xLengthRaw, pxRaw))
+        : pxRaw
+
+      if (typeof xAxis.p2l === 'function' && Number.isFinite(px)) {
+        const xLinear = Number(xAxis.p2l(px))
+        if (Number.isFinite(xLinear)) {
+          const xDataRaw =
+            typeof xAxis.l2d === 'function' ? xAxis.l2d(xLinear) : xLinear
+          const xData = Number(xDataRaw)
+          if (Number.isFinite(xData)) {
+            clickedX = xData
+          }
+        }
+      }
+    }
+
+    if (!Number.isFinite(clickedX)) {
+      const fallbackX = Number(points[0]?.x)
+      if (Number.isFinite(fallbackX)) {
+        clickedX = fallbackX
+      }
+    }
+
+    if (!Number.isFinite(clickedX)) {
       return
     }
 
     dispatch({
-      type: 'SPECTRUM_SET_ACTIVE',
-      id: clickedSpectrumId,
+      type: 'PEAKS_MANUAL_ADD',
+      spectrumId: clickedSpectrumId,
+      x: clickedX,
     })
   }
+
+  const deletePeakByBinding = useCallback(
+    (binding: PeakAnnotationBinding) => {
+      dispatch({
+        type:
+          binding.source === 'manual' ? 'PEAKS_MANUAL_DELETE' : 'PEAKS_AUTO_DELETE',
+        spectrumId: binding.spectrumId,
+        peakId: binding.peakId,
+      })
+    },
+    [dispatch],
+  )
+
+  const handleClickAnnotation = useCallback(
+    (eventPayload: unknown) => {
+      if (typeof eventPayload !== 'object' || eventPayload === null) {
+        return
+      }
+
+      const payload = eventPayload as {
+        index?: unknown
+        annotation?: { index?: unknown; _index?: unknown } | null
+        event?: { shiftKey?: unknown } | null
+      }
+      const annotationIndexRaw =
+        payload.index ?? payload.annotation?.index ?? payload.annotation?._index
+      const annotationIndex = Number(annotationIndexRaw)
+      if (!Number.isInteger(annotationIndex)) {
+        return
+      }
+
+      const binding = annotationIndexMapRef.current[annotationIndex]
+      if (!binding) {
+        return
+      }
+
+      const shiftPressed = shiftDownRef.current || payload.event?.shiftKey === true
+      if (shiftPressed) {
+        deletePeakByBinding(binding)
+        setSelectedPeak((current) =>
+          current &&
+          current.spectrumId === binding.spectrumId &&
+          current.peakId === binding.peakId
+            ? null
+            : current,
+        )
+        return
+      }
+
+      setSelectedPeak({
+        spectrumId: binding.spectrumId,
+        peakId: binding.peakId,
+        source: binding.source,
+      })
+    },
+    [deletePeakByBinding],
+  )
+
+  const handlePlotRelayout = (relayoutEvent: unknown) => {
+    if (!leaderLabelsActive) {
+      return
+    }
+
+    if (typeof relayoutEvent !== 'object' || relayoutEvent === null) {
+      return
+    }
+
+    const relayoutPayload = relayoutEvent as Readonly<Record<string, unknown>>
+    const clearedAnnotationIndexes = parseAnnotationTextClears(relayoutPayload)
+    if (clearedAnnotationIndexes.size > 0) {
+      for (const annotationIndex of clearedAnnotationIndexes) {
+        const binding = annotationIndexMapRef.current[annotationIndex]
+        if (!binding) {
+          continue
+        }
+
+        deletePeakByBinding(binding)
+        setSelectedPeak((current) =>
+          current &&
+          current.spectrumId === binding.spectrumId &&
+          current.peakId === binding.peakId
+            ? null
+            : current,
+        )
+      }
+    }
+
+    const updatesByIndex = parseAnnotationOffsetUpdates(relayoutPayload)
+    if (updatesByIndex.size === 0) {
+      return
+    }
+
+    for (const [annotationIndex, update] of updatesByIndex) {
+      if (clearedAnnotationIndexes.has(annotationIndex)) {
+        continue
+      }
+
+      const binding = annotationIndexMapRef.current[annotationIndex]
+      if (!binding) {
+        continue
+      }
+
+      const currentOffset =
+        peakLabelOffsetsById[binding.spectrumId]?.[binding.peakId] ?? {
+          ax: 0,
+          ay: -40,
+        }
+      const nextAx = update.ax ?? currentOffset.ax
+      const nextAy = update.ay ?? currentOffset.ay
+
+      dispatch({
+        type: 'PEAKS_LABEL_OFFSET_SET',
+        spectrumId: binding.spectrumId,
+        peakId: binding.peakId,
+        ax: nextAx,
+        ay: nextAy,
+      })
+    }
+  }
+
+  useEffect(() => {
+    const map: Record<number, PeakAnnotationBinding> = {}
+    const peakAnnotationStartIndex = inlineAnnotations.length
+    for (let i = 0; i < peakAnnotationBindings.length; i += 1) {
+      map[peakAnnotationStartIndex + i] = peakAnnotationBindings[i]
+    }
+    annotationIndexMapRef.current = map
+  })
+
+  useEffect(() => {
+    if (!selectedPeak) {
+      return
+    }
+
+    const handleDeleteKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return
+      }
+
+      event.preventDefault()
+      deletePeakByBinding(selectedPeak)
+      setSelectedPeak(null)
+    }
+
+    window.addEventListener('keydown', handleDeleteKey)
+    return () => {
+      window.removeEventListener('keydown', handleDeleteKey)
+    }
+  }, [deletePeakByBinding, selectedPeak])
+
+  useEffect(() => {
+    const handleShiftDown = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        shiftDownRef.current = true
+      }
+    }
+
+    const handleShiftUp = (event: KeyboardEvent) => {
+      if (event.key === 'Shift') {
+        shiftDownRef.current = false
+      }
+    }
+
+    const handleWindowBlur = () => {
+      shiftDownRef.current = false
+    }
+
+    window.addEventListener('keydown', handleShiftDown)
+    window.addEventListener('keyup', handleShiftUp)
+    window.addEventListener('blur', handleWindowBlur)
+
+    return () => {
+      window.removeEventListener('keydown', handleShiftDown)
+      window.removeEventListener('keyup', handleShiftUp)
+      window.removeEventListener('blur', handleWindowBlur)
+    }
+  }, [])
 
   useEffect(() => {
     if (!plotDivRef.current) {
@@ -534,6 +1242,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   ])
 
   const layout: Partial<Layout> = {
+    uirevision: uiRevision,
+    editrevision: editRevision,
     autosize: !shouldPreviewCanvasSize,
     ...(shouldPreviewCanvasSize
       ? {
@@ -542,9 +1252,14 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         }
       : {}),
     margin: layoutMargins,
-    showlegend: useInlineLabels ? false : traces.length > 1,
+    showlegend:
+      useInlineLabels
+        ? false
+        : primaryTraces.length + (baselineTrace ? 1 : 0) > 1,
     ...(paletteColors === null ? { colorway: DEFAULT_COLORWAY } : {}),
-    ...(inlineAnnotations.length > 0 ? { annotations: inlineAnnotations } : {}),
+    ...(mergedAnnotations.length > 0
+      ? { annotations: mergedAnnotations }
+      : {}),
     font: {
       family: graphics.fontFamily || 'Arial',
       size: graphics.baseFontSize,
@@ -628,6 +1343,19 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     responsive: true,
     scrollZoom: true,
     displaylogo: false,
+    editable: leaderLabelsActive,
+    ...(leaderLabelsActive
+      ? {
+          edits: {
+            annotationPosition: true,
+            annotationText: false,
+            titleText: false,
+            axisTitleText: false,
+            legendText: false,
+            shapePosition: false,
+          },
+        }
+      : {}),
   }
 
   return (
@@ -663,6 +1391,8 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
               })
             }}
             onClick={handlePlotClick}
+            onClickAnnotation={handleClickAnnotation}
+            onRelayout={handlePlotRelayout}
             useResizeHandler
             style={{ width: '100%', height: '100%' }}
           />

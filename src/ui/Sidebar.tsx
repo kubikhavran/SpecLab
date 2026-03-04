@@ -4,6 +4,7 @@ import type { PlotCanvasMode, ThemeMode } from '../app/types/core'
 import { ImportSpectrum } from '../features/import/ImportSpectrum'
 import { ExportPanel } from '../features/export/ExportPanel'
 import { GraphicsPanel } from '../features/graphics/GraphicsPanel'
+import { PeaksPanel } from '../features/peaks/PeaksPanel'
 import { BaselinePanel } from '../features/baseline/BaselinePanel'
 import { SmoothingPanel } from '../features/smoothing/SmoothingPanel'
 import { CosmicRaysPanel } from '../features/cosmic/CosmicRaysPanel'
@@ -17,8 +18,9 @@ const sections = [
   'Graf',
   'Baseline',
   'Smoothing',
-  'Cosmic rays',
   'Graphics',
+  'Peaks',
+  'Cosmic rays',
   'Export',
   'Presets',
 ]
@@ -98,6 +100,7 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
       patch: {
         yMin: result.yMin,
         yMax: result.yMax,
+        uiRevision: (plot.uiRevision ?? 1) + 1,
       },
     })
   }
@@ -248,6 +251,7 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
                             xMax: null,
                             yMin: null,
                             yMax: null,
+                            uiRevision: (plot.uiRevision ?? 1) + 1,
                           },
                         })
                       }
@@ -304,11 +308,14 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
               {section === 'Data' ? <SpectrumList /> : null}
               {section === 'Baseline' ? <BaselinePanel /> : null}
               {section === 'Smoothing' ? <SmoothingPanel /> : null}
-              {section === 'Cosmic rays' ? <CosmicRaysPanel /> : null}
               {section === 'Graphics' ? <GraphicsPanel /> : null}
+              {section === 'Peaks' ? <PeaksPanel /> : null}
+              {section === 'Cosmic rays' ? <CosmicRaysPanel /> : null}
               {section === 'Export' ? <ExportPanel plotDivRef={plotDivRef} /> : null}
               {section === 'Presets' ? <PresetsPanel /> : null}
-              {section !== 'Cosmic rays' && section !== 'Presets' ? (
+              {section !== 'Cosmic rays' &&
+              section !== 'Presets' &&
+              section !== 'Peaks' ? (
                 <p>Placeholder controls for {section.toLowerCase()}.</p>
               ) : null}
             </div>
