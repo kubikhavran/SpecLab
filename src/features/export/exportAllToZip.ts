@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import type { Spectrum } from '../../app/types/core'
-import { downloadBlobFile } from '../../lib/downloadBlobFile'
+import { saveBlobOutput } from './exportSave'
 import { spectrumToDelimitedText } from './exportSpectrumData'
 
 type ExportAllToZipOptions = {
@@ -8,6 +8,7 @@ type ExportAllToZipOptions = {
   delimiter: ';' | '\t'
   decimalComma: boolean
   zipFileName: string
+  exportFolder: string
 }
 
 function sanitizeName(rawName: string): string {
@@ -20,7 +21,7 @@ function sanitizeName(rawName: string): string {
 }
 
 export async function exportAllToZip(options: ExportAllToZipOptions) {
-  const { spectra, delimiter, decimalComma, zipFileName } = options
+  const { spectra, delimiter, decimalComma, zipFileName, exportFolder } = options
   const zip = new JSZip()
   const usedNames = new Set<string>()
   const extension = delimiter === ';' ? 'csv' : 'tsv'
@@ -46,5 +47,10 @@ export async function exportAllToZip(options: ExportAllToZipOptions) {
   }
 
   const blob = await zip.generateAsync({ type: 'blob' })
-  downloadBlobFile(zipFileName, blob, 'application/zip')
+  await saveBlobOutput({
+    fileName: zipFileName,
+    blob,
+    mime: 'application/zip',
+    exportFolder,
+  })
 }

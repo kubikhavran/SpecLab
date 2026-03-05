@@ -1,9 +1,8 @@
 import type { MutableRefObject } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout, PlotlyHTMLElement } from 'plotly.js'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
-import { downloadTextFile } from '../../lib/downloadTextFile'
 import { getExportFilename } from './exportFilename'
 import {
   decodePlotlySvgDataUrl,
@@ -12,6 +11,12 @@ import {
   patchTickStyles,
 } from './exportSvgPipeline'
 import { exportAllToZip } from './exportAllToZip'
+import {
+  chooseExportFolder,
+  EXPORT_FOLDER_STORAGE_KEY,
+  isTauriRuntime,
+  saveTextOutput,
+} from './exportSave'
 import { spectrumToDelimitedText } from './exportSpectrumData'
 
 type ExportPanelProps = {
@@ -19,18 +24,6 @@ type ExportPanelProps = {
 }
 
 type ExportFormat = 'png' | 'svg'
-type ExportPreset = 'screen' | 'publication'
-
-type LooseAxis = {
-  titlefont?: unknown
-  title?: { font?: unknown }
-  tickfont?: unknown
-  linewidth?: unknown
-  ticks?: unknown
-  ticklen?: unknown
-  showline?: unknown
-  mirror?: unknown
-}
 
 type LooseAnnotation = Record<string, unknown> & {
   bgcolor?: unknown
@@ -42,13 +35,6 @@ type LooseAnnotation = Record<string, unknown> & {
 type LooseLayout = {
   paper_bgcolor?: unknown
   plot_bgcolor?: unknown
-  font?: {
-    family?: unknown
-    size?: unknown
-  }
-  xaxis?: LooseAxis
-  yaxis?: LooseAxis
-  legend?: { font?: unknown }
   annotations?: unknown
 }
 
@@ -105,14 +91,6 @@ function getInlineLabelBgColor(color: string | undefined): string {
 
 function asString(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback
-}
-
-function asNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
-function asBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback
 }
 
 function getPrimarySpectrumTraceWidths(
@@ -195,7 +173,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
   const dispatch = useAppDispatch()
   const [transparentBackground, setTransparentBackground] = useState(false)
   const [decimalComma, setDecimalComma] = useState(true)
-  const [exportPreset, setExportPreset] = useState<ExportPreset>('screen')
   const [isExporting, setIsExporting] = useState(false)
   const roundedExportW = Math.round(graphics.exportWidth)
   const roundedExportH = Math.round(graphics.exportHeight)
@@ -225,8 +202,24 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
   const hasSpectra = spectra.length > 0
   const exportDisabled = !isPlotReady || isExporting
   const exportDataDisabled = !hasSpectra
+  const tauriEnabled = isTauriRuntime()
 
-  const exportData = (delimiter: ';' | '\t') => {
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(
+        EXPORT_FOLDER_STORAGE_KEY,
+        exportSettings.folder,
+      )
+    } catch {
+      // Ignore persistence failures in restricted browser modes.
+    }
+  }, [exportSettings.folder])
+
+  const exportData = async (delimiter: ';' | '\t') => {
     if (!activeSpectrum) {
       return
     }
@@ -247,7 +240,12 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
       defaultDataBase,
     )
 
-    downloadTextFile(fileName, serialized, mime)
+    await saveTextOutput({
+      fileName,
+      text: serialized,
+      mime,
+      exportFolder: exportSettings.folder,
+    })
   }
 
   const exportAllData = async (delimiter: ';' | '\t') => {
@@ -264,6 +262,7 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         'zip',
         defaultZipBase,
       ),
+      exportFolder: exportSettings.folder,
     })
   }
 
@@ -280,27 +279,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
     const fullLayoutAny = graphState._fullLayout ?? graphState.layout ?? {}
     const prevPaper = asString(fullLayoutAny.paper_bgcolor, '#ffffff')
     const prevPlot = asString(fullLayoutAny.plot_bgcolor, '#ffffff')
-    const prevFontFamily = asString(fullLayoutAny.font?.family, 'Arial')
-    const prevFontSize = asNumber(fullLayoutAny.font?.size, 12)
-    const prevXTitleFont =
-      fullLayoutAny.xaxis?.title?.font ??
-      fullLayoutAny.xaxis?.titlefont ?? { size: 12 }
-    const prevXTickFont = fullLayoutAny.xaxis?.tickfont ?? { size: 12 }
-    const prevXLineWidth = asNumber(fullLayoutAny.xaxis?.linewidth, 0)
-    const prevXTicks = asString(fullLayoutAny.xaxis?.ticks, '')
-    const prevXTickLen = asNumber(fullLayoutAny.xaxis?.ticklen, 0)
-    const prevXShowLine = asBoolean(fullLayoutAny.xaxis?.showline, false)
-    const prevXMirror = fullLayoutAny.xaxis?.mirror ?? false
-    const prevYTitleFont =
-      fullLayoutAny.yaxis?.title?.font ??
-      fullLayoutAny.yaxis?.titlefont ?? { size: 12 }
-    const prevYTickFont = fullLayoutAny.yaxis?.tickfont ?? { size: 12 }
-    const prevYLineWidth = asNumber(fullLayoutAny.yaxis?.linewidth, 0)
-    const prevYTicks = asString(fullLayoutAny.yaxis?.ticks, '')
-    const prevYTickLen = asNumber(fullLayoutAny.yaxis?.ticklen, 0)
-    const prevYShowLine = asBoolean(fullLayoutAny.yaxis?.showline, false)
-    const prevYMirror = fullLayoutAny.yaxis?.mirror ?? false
-    const prevLegendFont = fullLayoutAny.legend?.font ?? { size: 12 }
     const currentAnnotations =
       Array.isArray(fullLayoutAny.annotations)
         ? fullLayoutAny.annotations
@@ -321,54 +299,10 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
           return typeof lineValue?.width === 'number' ? lineValue.width : 2
         })
       : []
-
-    const publicationTraceWidths = currentTraceWidths.map((width) =>
-      Math.max(width, 2.5),
-    )
-
-    const publicationLayoutPatch: Record<string, unknown> = {
-      'font.family': 'Arial',
-      'font.size': 18,
-      'xaxis.title.font.size': 20,
-      'xaxis.tickfont.size': 16,
-      'xaxis.linewidth': 2,
-      'xaxis.ticks': 'outside',
-      'xaxis.ticklen': 6,
-      'xaxis.showline': true,
-      'xaxis.mirror': true,
-      'yaxis.title.font.size': 20,
-      'yaxis.tickfont.size': 16,
-      'yaxis.linewidth': 2,
-      'yaxis.ticks': 'outside',
-      'yaxis.ticklen': 6,
-      'yaxis.showline': true,
-      'yaxis.mirror': true,
-      'legend.font.size': 16,
-    }
-    const publicationTracePatch = {
-      'line.width': publicationTraceWidths,
-    } as unknown as Data
     const restoreTracePatch = {
       'line.width': currentTraceWidths,
     } as unknown as Data
     const restoreLayoutPatch: Record<string, unknown> = {
-      'font.family': prevFontFamily,
-      'font.size': prevFontSize,
-      'xaxis.title.font': prevXTitleFont,
-      'xaxis.tickfont': prevXTickFont,
-      'xaxis.linewidth': prevXLineWidth,
-      'xaxis.ticks': prevXTicks,
-      'xaxis.ticklen': prevXTickLen,
-      'xaxis.showline': prevXShowLine,
-      'xaxis.mirror': prevXMirror,
-      'yaxis.title.font': prevYTitleFont,
-      'yaxis.tickfont': prevYTickFont,
-      'yaxis.linewidth': prevYLineWidth,
-      'yaxis.ticks': prevYTicks,
-      'yaxis.ticklen': prevYTickLen,
-      'yaxis.showline': prevYShowLine,
-      'yaxis.mirror': prevYMirror,
-      'legend.font': prevLegendFont,
       paper_bgcolor: prevPaper,
       plot_bgcolor: prevPlot,
     }
@@ -388,14 +322,6 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
           paper_bgcolor: '#ffffff',
           plot_bgcolor: '#ffffff',
         })
-      }
-
-      if (exportPreset === 'publication') {
-        await Plotly.relayout(
-          graphDiv,
-          publicationLayoutPatch as unknown as Partial<Layout>,
-        )
-        await Plotly.restyle(graphDiv, publicationTracePatch)
       }
 
       if (currentAnnotations && currentAnnotations.length > 0) {
@@ -445,7 +371,11 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         })
 
         if (format === 'svg') {
-          downloadSvg(patchedSvgText, exportFileName)
+          await downloadSvg(
+            patchedSvgText,
+            exportFileName,
+            exportSettings.folder,
+          )
         } else {
           await downloadPngFromSvg({
             svgText: patchedSvgText,
@@ -454,6 +384,7 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
             height: exportH,
             scale: 2,
             transparentBackground,
+            exportFolder: exportSettings.folder,
           })
         }
       })
@@ -497,19 +428,45 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
         />
       </label>
 
-      <label className="block space-y-1">
-        <span className="text-xs text-slate-700">Export preset</span>
-        <select
-          className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
-          value={exportPreset}
-          onChange={(event) =>
-            setExportPreset(event.currentTarget.value as ExportPreset)
-          }
-        >
-          <option value="screen">Screen</option>
-          <option value="publication">Publication</option>
-        </select>
-      </label>
+      <div className="space-y-1">
+        <span className="text-xs text-slate-700">Export folder</span>
+        <div className="flex gap-1">
+          <input
+            type="text"
+            readOnly
+            className="w-full rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs text-slate-700"
+            value={exportSettings.folder}
+            placeholder="Not set (downloads in browser)"
+          />
+          <button
+            type="button"
+            className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
+            disabled={!tauriEnabled}
+            onClick={() => {
+              void (async () => {
+                const selectedFolder = await chooseExportFolder(
+                  exportSettings.folder,
+                )
+                if (!selectedFolder) {
+                  return
+                }
+
+                dispatch({
+                  type: 'EXPORT_SET',
+                  patch: { folder: selectedFolder },
+                })
+              })()
+            }}
+          >
+            Choose...
+          </button>
+        </div>
+        {!tauriEnabled ? (
+          <p className="text-[11px] text-slate-400">
+            Folder saving is available in the Tauri app.
+          </p>
+        ) : null}
+      </div>
 
       <label className="flex items-center gap-2 text-xs text-slate-700">
         <input
@@ -567,19 +524,23 @@ export function ExportPanel({ plotDivRef }: ExportPanelProps) {
           <button
             type="button"
             className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
-            disabled={exportDataDisabled}
-            onClick={() => exportData(';')}
-          >
-            Export CSV (;)
-          </button>
+          disabled={exportDataDisabled}
+          onClick={() => {
+            void exportData(';')
+          }}
+        >
+          Export CSV (;)
+        </button>
           <button
             type="button"
             className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"
-            disabled={exportDataDisabled}
-            onClick={() => exportData('\t')}
-          >
-            Export TSV
-          </button>
+          disabled={exportDataDisabled}
+          onClick={() => {
+            void exportData('\t')
+          }}
+        >
+          Export TSV
+        </button>
           <button
             type="button"
             className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-default disabled:opacity-50"

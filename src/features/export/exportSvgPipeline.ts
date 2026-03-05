@@ -1,4 +1,4 @@
-import { downloadBlobFile } from '../../lib/downloadBlobFile'
+import { saveBlobOutput } from './exportSave'
 
 type TickStyleOptions = {
   tickLabelBold: boolean
@@ -12,6 +12,7 @@ type DownloadPngFromSvgOptions = {
   height: number
   scale: number
   transparentBackground: boolean
+  exportFolder: string
 }
 
 const TICK_TEXT_SELECTOR = [
@@ -76,11 +77,20 @@ export function patchTickStyles(
   return new XMLSerializer().serializeToString(xmlDocument)
 }
 
-export function downloadSvg(svgText: string, filename: string): void {
+export async function downloadSvg(
+  svgText: string,
+  filename: string,
+  exportFolder: string,
+): Promise<void> {
   const svgBlob = new Blob([svgText], {
     type: 'image/svg+xml;charset=utf-8',
   })
-  downloadBlobFile(filename, svgBlob, 'image/svg+xml;charset=utf-8')
+  await saveBlobOutput({
+    fileName: filename,
+    blob: svgBlob,
+    mime: 'image/svg+xml;charset=utf-8',
+    exportFolder,
+  })
 }
 
 export async function downloadPngFromSvg({
@@ -90,6 +100,7 @@ export async function downloadPngFromSvg({
   height,
   scale,
   transparentBackground,
+  exportFolder,
 }: DownloadPngFromSvgOptions): Promise<void> {
   const svgBlob = new Blob([svgText], {
     type: 'image/svg+xml;charset=utf-8',
@@ -135,7 +146,12 @@ export async function downloadPngFromSvg({
       }, 'image/png')
     })
 
-    downloadBlobFile(filename, pngBlob, 'image/png')
+    await saveBlobOutput({
+      fileName: filename,
+      blob: pngBlob,
+      mime: 'image/png',
+      exportFolder,
+    })
   } finally {
     URL.revokeObjectURL(svgUrl)
   }

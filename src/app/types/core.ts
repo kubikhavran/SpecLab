@@ -246,6 +246,7 @@ export type GraphicsSettings = {
 
 export type ExportSettings = {
   filename: string
+  folder: string
 }
 
 export interface AppState {

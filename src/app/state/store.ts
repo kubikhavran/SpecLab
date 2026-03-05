@@ -7,6 +7,7 @@ import {
 import { loadPresetsFromStorage } from '../../features/presets/presetsStorage'
 
 const THEME_STORAGE_KEY = 'speclab.theme'
+const EXPORT_FOLDER_STORAGE_KEY = 'speclab.exportFolder'
 
 function getInitialThemeMode(): ThemeMode {
   if (typeof window === 'undefined') {
@@ -28,6 +29,19 @@ function getInitialThemeMode(): ThemeMode {
   }
 
   return 'system'
+}
+
+function getInitialExportFolder(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(EXPORT_FOLDER_STORAGE_KEY)
+    return typeof storedValue === 'string' ? storedValue : ''
+  } catch {
+    return ''
+  }
 }
 
 export const initialState: AppState = {
@@ -109,5 +123,6 @@ export const initialState: AppState = {
   },
   export: {
     filename: '',
+    folder: getInitialExportFolder(),
   },
 }
