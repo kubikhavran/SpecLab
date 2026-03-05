@@ -1,73 +1,140 @@
-# React + TypeScript + Vite
+SpecLab – Raman Spectrum Visualization and Analysis Tool
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+1. Overview
 
-Currently, two official plugins are available:
+SpecLab is a desktop application for practical Raman spectrum visualization and analysis in laboratory workflows. It helps you load, inspect, and compare one or multiple spectra in a single view, including overlay mode for direct comparison. The app includes peak detection and manual peak labeling/editing to support fast interpretation of spectral features. It is also designed for quick figure and data export for reports, presentations, and publication preparation.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+-------------------------------------------------------
 
-## React Compiler
+2. Installation (Windows)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Run the installer file:
+   SpecLab_x.x.x_x64-setup.exe
+2. Follow the installation wizard.
+3. Launch SpecLab from the Start Menu.
 
-## Expanding the ESLint configuration
+If Windows SmartScreen appears:
+- Click "More info"
+- Click "Run anyway"
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+SpecLab installs locally on your machine. In standard use, installation is per user and typically does not require administrator privileges.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+-------------------------------------------------------
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+3. Quick Start Guide
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+1) Load spectrum data in the Data section.
+2) Display multiple spectra together (overlay mode) for comparison.
+3) Adjust processing as needed (Cosmic rays, Baseline, Smoothing).
+4) Detect peaks automatically from the Peaks section.
+5) Add peaks manually by clicking on the plot.
+6) Remove peaks using Shift + click on a peak label, or click a label and press Backspace/Delete.
+7) Adjust axis labels and graphic styling in the Graphics section.
+8) Export figures or data from the Export section.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+-------------------------------------------------------
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+4. Peak Detection and Editing
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+SpecLab supports both automatic and manual peak workflows.
+
+Automatic detection:
+- Uses current peak settings and can run for the active spectrum or all spectra.
+
+Manual peak picking:
+- Click on the plot to add a manual peak label at the clicked X position.
+- Peak Y is derived from the displayed curve.
+
+Deleting peaks:
+- Shift + Left Click on a peak label
+  or
+- Click a peak label to select it, then press Backspace/Delete
+
+Peak sources:
+- AUTO detection
+- MANUAL labels
+
+-------------------------------------------------------
+
+5. Exporting Data and Figures
+
+Image export formats:
+- PNG
+- SVG
+
+Data export formats:
+- CSV
+- TSV
+- ZIP (for multi-spectrum batch exports)
+
+Peak table exports include these columns:
+- spectrum
+- x
+- y
+- source (A = automatic, M = manual)
+
+Image export size follows the current settings in the Graphics panel.
+
+-------------------------------------------------------
+
+6. Axis Labels and Formatting
+
+Axis labels support superscript and subscript syntax directly in label text.
+
+Examples:
+- Raman shift (cm^-1)
+- cm^{−1}
+- E_corr
+- CO_2
+
+Supported syntax:
+- ^x
+- _x
+- ^{...}
+- _{...}
+
+You can use these patterns anywhere in the label text.
+
+-------------------------------------------------------
+
+7. Tips
+
+- Use overlay mode to compare spectral shifts and intensity changes across samples.
+- For noisy data, tune peak detection parameters before final peak labeling.
+- If labels overlap, reset label positions and re-adjust manually.
+- Use presets to quickly reapply preferred styling and analysis settings.
+
+-------------------------------------------------------
+
+8. Troubleshooting
+
+Problem: Program does not start
+Solution: Reinstall SpecLab and/or restart Windows, then launch again.
+
+Problem: Export cannot be saved
+Solution: Check write permissions for the destination folder and verify the path is accessible.
+
+Problem: Peak labels cannot be deleted
+Solution: Click directly on the label text first, then press Delete/Backspace, or use Shift + click.
+
+-------------------------------------------------------
+
+9. Version
+
+SpecLab version: 0.1.0
+
+-------------------------------------------------------
+
+10. Author / Support
+
+Created by:
+Jakub Havránek
+
+Contact:
+Personal email:
+jakubhavranek120@gmail.com
+
+Academic / institutional email:
+havranek@vscht.cz
+
+If you encounter bugs or issues, please report them through the project repository or contact the author.
