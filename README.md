@@ -1,8 +1,8 @@
-SpecLab – Raman Spectrum Visualization and Analysis Tool
+SpecLab – Spectrum Visualization and Analysis Tool
 
 1. Overview
 
-SpecLab is a desktop application for practical Raman spectrum visualization and analysis in laboratory workflows. It helps you load, inspect, and compare one or multiple spectra in a single view, including overlay mode for direct comparison. The app includes peak detection and manual peak labeling/editing to support fast interpretation of spectral features. It is also designed for quick figure and data export for reports, presentations, and publication preparation.
+SpecLab is a desktop application for practical spectrum visualization and analysis in laboratory workflows. It helps you load, inspect, and compare one or multiple spectra in a single view, including overlay mode for direct comparison. The app includes peak detection and manual peak labeling/editing to support fast interpretation of spectral features. It is also designed for quick figure and data export for reports, presentations, and publication preparation.
 
 -------------------------------------------------------
 
