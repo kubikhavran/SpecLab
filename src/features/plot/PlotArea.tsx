@@ -17,6 +17,7 @@ import type {
 } from 'plotly.js'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import type { Peak, Spectrum } from '../../app/types/core'
+import { formatAxisLabel } from '../../lib/formatAxisLabel'
 import { getPaletteColors } from '../graphics/palettes'
 import { PeaksListPanel } from '../peaks/PeaksListPanel'
 import { applyTickTextInlineStyles } from './tickTextStyles'
@@ -181,6 +182,30 @@ function styleText(
   }
 
   return safe
+}
+
+function styleFormattedText(
+  formattedHtml: string,
+  bold: boolean,
+  italic: boolean,
+): string {
+  if (!formattedHtml) {
+    return formattedHtml
+  }
+
+  if (bold && italic) {
+    return `<b><i>${formattedHtml}</i></b>`
+  }
+
+  if (bold) {
+    return `<b>${formattedHtml}</b>`
+  }
+
+  if (italic) {
+    return `<i>${formattedHtml}</i>`
+  }
+
+  return formattedHtml
 }
 
 function isTransparentColor(color: string | undefined): boolean {
@@ -481,13 +506,13 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       : overlayMode
         ? overlaySpectra
         : [resolvedActiveSpectrum]
-  const xAxisLabelStyled = styleText(
-    graphics.xLabel.trim() || 'X',
+  const xAxisLabelStyled = styleFormattedText(
+    formatAxisLabel(graphics.xLabel.trim() || 'X'),
     graphics.axisLabelBold,
     graphics.axisLabelItalic,
   )
-  const yAxisLabelStyled = styleText(
-    graphics.yLabel.trim() || 'Y',
+  const yAxisLabelStyled = styleFormattedText(
+    formatAxisLabel(graphics.yLabel.trim() || 'Y'),
     graphics.axisLabelBold,
     graphics.axisLabelItalic,
   )
@@ -1351,10 +1376,11 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     },
   }
 
-  const config: Partial<Config> = {
+  const config: Partial<Config> & { sanitize?: boolean } = {
     responsive: true,
     scrollZoom: true,
     displaylogo: false,
+    sanitize: false,
     editable: leaderLabelsActive,
     ...(leaderLabelsActive
       ? {

@@ -1,6 +1,12 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
 import type { GraphicsPalette } from '../../app/types/core'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
+import { toSubscript, toSuperscript } from '../../lib/text/superSub'
 
 const fontFamilies = ['Arial', 'Inter', 'Times New Roman', 'Courier New'] as const
 const paletteOptions: Array<{ label: string; value: GraphicsPalette }> = [
@@ -26,11 +32,19 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
+type AxisLabelKey = 'xLabel' | 'yLabel'
+type ScriptKind = 'super' | 'sub'
+
+const SUPER_PLACEHOLDER = '\u2070'
+const SUB_PLACEHOLDER = '\u2080'
+
 export function GraphicsPanel() {
   const { graphics } = useAppState()
   const dispatch = useAppDispatch()
   const [widthText, setWidthText] = useState(String(graphics.exportWidth))
   const [heightText, setHeightText] = useState(String(graphics.exportHeight))
+  const xLabelInputRef = useRef<HTMLInputElement>(null)
+  const yLabelInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -64,12 +78,120 @@ export function GraphicsPanel() {
     }
   }
 
+  const setAxisLabel = (axisLabel: AxisLabelKey, nextValue: string) => {
+    dispatch({
+      type: 'GRAPHICS_SET',
+      patch: axisLabel === 'xLabel' ? { xLabel: nextValue } : { yLabel: nextValue },
+    })
+  }
+
+  const applyLabelScript = (
+    kind: ScriptKind,
+    axisLabel: AxisLabelKey,
+    currentValue: string,
+  ) => {
+    const inputRef = axisLabel === 'xLabel' ? xLabelInputRef : yLabelInputRef
+    const input = inputRef.current
+    if (!input) {
+      return
+    }
+
+    const selectionStart = input.selectionStart ?? currentValue.length
+    const selectionEnd = input.selectionEnd ?? selectionStart
+    const hasSelection = selectionEnd > selectionStart
+    const converter = kind === 'super' ? toSuperscript : toSubscript
+    const sourceText = hasSelection
+      ? currentValue.slice(selectionStart, selectionEnd)
+      : kind === 'super'
+        ? SUPER_PLACEHOLDER
+        : SUB_PLACEHOLDER
+    const converted = converter(sourceText)
+    const nextValue = `${currentValue.slice(0, selectionStart)}${converted}${currentValue.slice(selectionEnd)}`
+    const nextSelectionStart = hasSelection
+      ? selectionStart + converted.length
+      : selectionStart
+    const nextSelectionEnd = hasSelection
+      ? nextSelectionStart
+      : nextSelectionStart + converted.length
+
+    setAxisLabel(axisLabel, nextValue)
+
+    requestAnimationFrame(() => {
+      const nextInput = inputRef.current
+      if (!nextInput) {
+        return
+      }
+      nextInput.focus()
+      nextInput.setSelectionRange(nextSelectionStart, nextSelectionEnd)
+    })
+  }
+
+  const onAxisLabelKeyDown = (
+    axisLabel: AxisLabelKey,
+    currentValue: string,
+  ) => (event: KeyboardEvent<HTMLInputElement>) => {
+    const wantsSuperscript =
+      event.ctrlKey &&
+      event.shiftKey &&
+      (event.code === 'Period' || event.key === '.' || event.key === '>')
+    const wantsSubscript =
+      event.ctrlKey &&
+      event.shiftKey &&
+      (event.code === 'Comma' || event.key === ',' || event.key === '<')
+
+    if (!wantsSuperscript && !wantsSubscript) {
+      return
+    }
+
+    event.preventDefault()
+    applyLabelScript(
+      wantsSuperscript ? 'super' : 'sub',
+      axisLabel,
+      currentValue,
+    )
+  }
+
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-1">
         <label className="space-y-0.5">
-          <span className="text-[11px] text-slate-600">X label</span>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[11px] text-slate-600">X label</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-1 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  applyLabelScript(
+                    'super',
+                    'xLabel',
+                    graphics.xLabel,
+                  )
+                }
+                aria-label="Superscript selected X label text"
+              >
+                x^
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-1 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  applyLabelScript(
+                    'sub',
+                    'xLabel',
+                    graphics.xLabel,
+                  )
+                }
+                aria-label="Subscript selected X label text"
+              >
+                x_
+              </button>
+            </div>
+          </div>
           <input
+            ref={xLabelInputRef}
             type="text"
             className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-700"
             value={graphics.xLabel}
@@ -79,11 +201,50 @@ export function GraphicsPanel() {
                 patch: { xLabel: event.currentTarget.value },
               })
             }
+            onKeyDown={onAxisLabelKeyDown(
+              'xLabel',
+              graphics.xLabel,
+            )}
           />
         </label>
         <label className="space-y-0.5">
-          <span className="text-[11px] text-slate-600">Y label</span>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-[11px] text-slate-600">Y label</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-1 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  applyLabelScript(
+                    'super',
+                    'yLabel',
+                    graphics.yLabel,
+                  )
+                }
+                aria-label="Superscript selected Y label text"
+              >
+                x^
+              </button>
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-1 py-0.5 text-[10px] text-slate-700 hover:bg-slate-100"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  applyLabelScript(
+                    'sub',
+                    'yLabel',
+                    graphics.yLabel,
+                  )
+                }
+                aria-label="Subscript selected Y label text"
+              >
+                x_
+              </button>
+            </div>
+          </div>
           <input
+            ref={yLabelInputRef}
             type="text"
             className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-700"
             value={graphics.yLabel}
@@ -93,9 +254,17 @@ export function GraphicsPanel() {
                 patch: { yLabel: event.currentTarget.value },
               })
             }
+            onKeyDown={onAxisLabelKeyDown(
+              'yLabel',
+              graphics.yLabel,
+            )}
           />
         </label>
       </div>
+      <p className="text-[11px] text-slate-500">
+        Tip: use ^{'{...}'} for superscript and _{'{...}'} for subscript (e.g.,
+        {' '}cm^{'{-1}'}, E_{'{corr}'}).
+      </p>
 
       <div className="grid grid-cols-2 gap-1">
         <label className="flex items-center gap-2 text-xs text-slate-700">
