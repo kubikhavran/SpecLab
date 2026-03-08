@@ -14,6 +14,12 @@ type PeakGroup = {
   rows: PeakRow[]
 }
 
+export type SelectedPeakRow = {
+  spectrumId: string
+  peakId: string
+  source: 'auto' | 'manual'
+}
+
 type ExportFormat = 'tsv' | 'csv'
 const PEAKS_PANEL_COLLAPSED_KEY = 'speclab_peaksPanelCollapsed'
 
@@ -132,7 +138,21 @@ function formatY(value: number | null): string {
   return trimmed === '-0' ? '0' : trimmed
 }
 
-export function PeaksListPanel() {
+type PeaksListPanelProps = {
+  selectedPeak: SelectedPeakRow | null
+  onSelectPeak: (peak: SelectedPeakRow | null) => void
+  onDeletePeak: (peak: SelectedPeakRow) => void
+}
+
+function makePeakRowDomId(peak: SelectedPeakRow): string {
+  return `peak-row-${peak.spectrumId}-${peak.source}-${peak.peakId}`
+}
+
+export function PeaksListPanel({
+  selectedPeak,
+  onSelectPeak,
+  onDeletePeak,
+}: PeaksListPanelProps) {
   const {
     spectra,
     activeSpectrumId,
@@ -158,6 +178,7 @@ export function PeaksListPanel() {
     }
   })
   const copyStatusTimerRef = useRef<number | null>(null)
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
 
   const activeSpectrum =
     activeSpectrumId !== undefined
@@ -312,6 +333,16 @@ export function PeaksListPanel() {
     }
   }, [collapsed])
 
+  useEffect(() => {
+    if (!selectedPeak || collapsed) {
+      return
+    }
+
+    const rowId = makePeakRowDomId(selectedPeak)
+    const rowElement = rowRefs.current[rowId]
+    rowElement?.scrollIntoView({ block: 'nearest' })
+  }, [collapsed, selectedPeak])
+
   if (groups.length === 0) {
     return null
   }
@@ -408,25 +439,74 @@ export function PeaksListPanel() {
                       <th className="w-14 px-2 py-1 text-left font-medium text-slate-600 dark:text-slate-300">
                         Source
                       </th>
+                      <th className="w-16 px-2 py-1 text-left font-medium text-slate-600 dark:text-slate-300">
+                        Delete
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {group.rows.map((row) => (
-                      <tr
-                        key={row.id}
-                        className="border-t border-slate-100 dark:border-slate-800"
-                      >
-                        <td className="px-2 py-1 text-slate-700 dark:text-slate-200">
-                          {row.x.toFixed(decimals)}
-                        </td>
-                        <td className="px-2 py-1 text-slate-700 dark:text-slate-200">
-                          {formatY(row.y)}
-                        </td>
-                        <td className="px-2 py-1 text-slate-500 dark:text-slate-400">
-                          {row.source === 'auto' ? 'A' : 'M'}
-                        </td>
-                      </tr>
-                    ))}
+                    {group.rows.map((row) => {
+                      const isSelected =
+                        selectedPeak?.spectrumId === group.spectrumId &&
+                        selectedPeak.peakId === row.id &&
+                        selectedPeak.source === row.source
+
+                      return (
+                        <tr
+                          key={row.id}
+                          className={`border-t border-slate-100 dark:border-slate-800 ${
+                            isSelected
+                              ? 'bg-sky-100/70 dark:bg-sky-900/30'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                          } cursor-pointer`}
+                          onClick={() =>
+                            onSelectPeak({
+                              spectrumId: group.spectrumId,
+                              peakId: row.id,
+                              source: row.source,
+                            })
+                          }
+                          ref={(node) => {
+                            rowRefs.current[
+                              makePeakRowDomId({
+                                spectrumId: group.spectrumId,
+                                peakId: row.id,
+                                source: row.source,
+                              })
+                            ] = node
+                          }}
+                        >
+                          <td className="px-2 py-1 text-slate-700 dark:text-slate-200">
+                            {row.x.toFixed(decimals)}
+                          </td>
+                          <td className="px-2 py-1 text-slate-700 dark:text-slate-200">
+                            {formatY(row.y)}
+                          </td>
+                          <td className="px-2 py-1 text-slate-500 dark:text-slate-400">
+                            {row.source === 'auto' ? 'A' : 'M'}
+                          </td>
+                          <td className="px-2 py-1">
+                            <button
+                              type="button"
+                              className="rounded border border-rose-300 px-1.5 py-0.5 text-[11px] text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-900/20"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onDeletePeak({
+                                  spectrumId: group.spectrumId,
+                                  peakId: row.id,
+                                  source: row.source,
+                                })
+                                if (isSelected) {
+                                  onSelectPeak(null)
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

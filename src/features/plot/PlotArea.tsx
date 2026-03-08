@@ -19,7 +19,10 @@ import { useAppDispatch, useAppState } from '../../app/state/AppStore'
 import type { Peak, Spectrum } from '../../app/types/core'
 import { formatAxisLabel } from '../../lib/formatAxisLabel'
 import { getPaletteColors } from '../graphics/palettes'
-import { PeaksListPanel } from '../peaks/PeaksListPanel'
+import {
+  PeaksListPanel,
+  type SelectedPeakRow,
+} from '../peaks/PeaksListPanel'
 import { applyTickTextInlineStyles } from './tickTextStyles'
 
 type PlotSeries = {
@@ -68,27 +71,9 @@ type PeakLabelOffsetDraft = {
   ay?: number
 }
 
-type PlotlyAnnotationClickPayload = {
-  index?: unknown
-  annotation?: {
-    index?: unknown
-    _index?: unknown
-    x?: unknown
-    customdata?: unknown
-  } | null
-  event?: {
-    shiftKey?: unknown
-    button?: unknown
-  } | null
-}
-
-type PlotlyAnnotationEmitter = PlotlyHTMLElement & {
-  on?: (eventName: string, handler: (payload: unknown) => void) => void
-  off?: (eventName: string, handler: (payload: unknown) => void) => void
-  removeListener?: (
-    eventName: string,
-    handler: (payload: unknown) => void,
-  ) => void
+type BoundAnnotationDomListener = {
+  element: Element
+  handler: (event: Event) => void
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -139,21 +124,6 @@ function computeLayoutMargins(
       Math.round(options.baseFontSize * 3.0 * labelStyleFactor + xTickExtra),
     ),
   }
-}
-
-function getRange(values: number[]): { min: number; max: number } {
-  if (values.length === 0) {
-    return { min: Number.NaN, max: Number.NaN }
-  }
-
-  return {
-    min: Math.min(...values),
-    max: Math.max(...values),
-  }
-}
-
-function formatRangeValue(value: number): string {
-  return Number.isFinite(value) ? value.toString() : 'n/a'
 }
 
 function truncateLabel(text: string, maxLength: number): string {
@@ -438,45 +408,6 @@ function parseAnnotationOffsetUpdates(
   return updatesByIndex
 }
 
-function parseAnnotationTextClears(
-  relayout: Readonly<Record<string, unknown>>,
-): Set<number> {
-  const clearedIndexes = new Set<number>()
-
-  for (const [key, value] of Object.entries(relayout)) {
-    const textMatch = key.match(/^annotations\[(\d+)\]\.text$/)
-    if (textMatch) {
-      if (value === '' || value === null) {
-        clearedIndexes.add(Number(textMatch[1]))
-      }
-      continue
-    }
-
-    const fullAnnotationMatch = key.match(/^annotations\[(\d+)\]$/)
-    if (!fullAnnotationMatch) {
-      continue
-    }
-
-    const index = Number(fullAnnotationMatch[1])
-    if (value === null) {
-      clearedIndexes.add(index)
-      continue
-    }
-
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'text' in value &&
-      ((value as { text?: unknown }).text === '' ||
-        (value as { text?: unknown }).text === null)
-    ) {
-      clearedIndexes.add(index)
-    }
-  }
-
-  return clearedIndexes
-}
-
 function isElement(value: unknown): value is Element {
   return typeof Element !== 'undefined' && value instanceof Element
 }
@@ -500,71 +431,12 @@ function isTypingElement(value: unknown): boolean {
     return true
   }
 
-  const asHtmlElement =
-    typeof HTMLElement !== 'undefined' && value instanceof HTMLElement
-      ? value
-      : null
-
   return (
-    Boolean(asHtmlElement?.isContentEditable) ||
+    (typeof HTMLElement !== 'undefined' &&
+      value instanceof HTMLElement &&
+      value.isContentEditable) ||
     value.closest('[contenteditable="true"]') !== null
   )
-}
-
-function parseAnnotationIndexFromPayload(payload: PlotlyAnnotationClickPayload): number | null {
-  const indexRaw =
-    payload.index ?? payload.annotation?.index ?? payload.annotation?._index
-  const index = Number(indexRaw)
-  return Number.isInteger(index) ? index : null
-}
-
-function parseBindingFromCustomData(customData: unknown): PeakAnnotationBinding | null {
-  if (typeof customData !== 'object' || customData === null) {
-    return null
-  }
-
-  const value = customData as {
-    spectrumId?: unknown
-    peakId?: unknown
-    source?: unknown
-    x?: unknown
-  }
-
-  if (
-    typeof value.spectrumId !== 'string' ||
-    value.spectrumId.length === 0 ||
-    typeof value.peakId !== 'string' ||
-    value.peakId.length === 0 ||
-    (value.source !== 'auto' && value.source !== 'manual')
-  ) {
-    return null
-  }
-
-  const x = Number(value.x)
-  return {
-    spectrumId: value.spectrumId,
-    peakId: value.peakId,
-    source: value.source,
-    ...(Number.isFinite(x) ? { x } : {}),
-  }
-}
-
-function detachPlotlyAnnotationListener(
-  graphDiv: PlotlyAnnotationEmitter | null,
-  handler: (payload: unknown) => void,
-) {
-  if (!graphDiv) {
-    return
-  }
-
-  if (typeof graphDiv.off === 'function') {
-    graphDiv.off('plotly_clickannotation', handler)
-    return
-  }
-
-  if (typeof graphDiv.removeListener === 'function') {
-    graphDiv.removeListener('plotly_clickannotation', handler)
-  }
 }
 
 export function PlotArea({ plotDivRef }: PlotAreaProps) {
@@ -586,16 +458,10 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   } = useAppState()
   const dispatch = useAppDispatch()
   const annotationIndexMapRef = useRef<Record<number, PeakAnnotationBinding>>({})
-  const [selectedPeak, setSelectedPeak] = useState<PeakAnnotationBinding | null>(
-    null,
-  )
-  const selectedPeakRef = useRef<PeakAnnotationBinding | null>(null)
-  const boundAnnotationGraphDivRef = useRef<PlotlyAnnotationEmitter | null>(null)
-  const onPlotlyClickAnnotationRef = useRef<(payload: unknown) => void>(() => {})
-  const onPlotlyClickAnnotationBridgeRef = useRef<
-    ((payload: unknown) => void) | null
-  >(null)
-  const shiftDownRef = useRef(false)
+  const [selectedPeak, setSelectedPeak] = useState<SelectedPeakRow | null>(null)
+  const selectedPeakRef = useRef<SelectedPeakRow | null>(null)
+  const boundAnnotationDomGraphDivRef = useRef<PlotlyHTMLElement | null>(null)
+  const boundAnnotationDomListenersRef = useRef<BoundAnnotationDomListener[]>([])
   const spectrumIds = new Set(spectra.map((spectrum) => spectrum.id))
 
   const resolvedActiveSpectrum =
@@ -693,10 +559,6 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             isActive: false,
           },
         ]
-  const allX = series.flatMap((entry) => entry.x)
-  const allY = series.flatMap((entry) => entry.y)
-  const xRange = getRange(allX)
-  const yRange = getRange(allY)
   const hasXRange = plot.xMin != null && plot.xMax != null
   const primaryTraceCount = series.length
   const paletteColors = getPaletteColors(graphics.palette, primaryTraceCount)
@@ -1050,15 +912,9 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         })
         .filter((annotation): annotation is NonNullable<typeof annotation> => annotation !== null)
     : []
-  const peakAnnotationsWithCaptureEvents: NonNullable<Layout['annotations']> =
-    peakAnnotations.map((annotation) => ({
-      ...annotation,
-      // Keep annotation clicks reliable for plotly_clickannotation.
-      captureevents: true,
-    }))
   const mergedAnnotations: NonNullable<Layout['annotations']> = [
     ...inlineAnnotations,
-    ...peakAnnotationsWithCaptureEvents,
+    ...peakAnnotations,
   ]
   const hasYRange = plot.yMin != null && plot.yMax != null
   const showXMarks = graphics.showXTickLabels && graphics.showXTickMarks
@@ -1084,6 +940,17 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   ]
     .filter(Boolean)
     .join(' ')
+
+  const deletePeakByBinding = useCallback(
+    (binding: SelectedPeakRow) => {
+      dispatch({
+        type: binding.source === 'manual' ? 'PEAKS_MANUAL_DELETE' : 'PEAKS_AUTO_DELETE',
+        spectrumId: binding.spectrumId,
+        peakId: binding.peakId,
+      })
+    },
+    [dispatch],
+  )
 
   const handlePlotClick = (event: Readonly<PlotMouseEvent>) => {
     const points = event.points
@@ -1208,121 +1075,6 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     })
   }
 
-  const deletePeakByBinding = useCallback(
-    (binding: PeakAnnotationBinding) => {
-      dispatch({
-        type:
-          binding.source === 'manual' ? 'PEAKS_MANUAL_DELETE' : 'PEAKS_AUTO_DELETE',
-        spectrumId: binding.spectrumId,
-        peakId: binding.peakId,
-      })
-    },
-    [dispatch],
-  )
-
-  const resolveBindingByFallback = (xRaw: unknown): PeakAnnotationBinding | null => {
-    const x = Number(xRaw)
-    if (!Number.isFinite(x)) {
-      return null
-    }
-
-    const fallbackSpectrumId = resolvedActiveId ?? spectra[0]?.id
-    if (!fallbackSpectrumId) {
-      return null
-    }
-
-    const allPeaks = [
-      ...(peaksAutoById[fallbackSpectrumId] ?? []),
-      ...(peaksManualById[fallbackSpectrumId] ?? []),
-    ]
-    if (allPeaks.length === 0) {
-      return null
-    }
-
-    let bestPeak: Peak | null = null
-    let bestDistance = Number.POSITIVE_INFINITY
-    for (const peak of allPeaks) {
-      const distance = Math.abs(peak.x - x)
-      if (distance < bestDistance) {
-        bestDistance = distance
-        bestPeak = peak
-      }
-    }
-
-    if (!bestPeak) {
-      return null
-    }
-
-    return {
-      spectrumId: fallbackSpectrumId,
-      peakId: bestPeak.id,
-      source: bestPeak.source,
-      x: bestPeak.x,
-    }
-  }
-
-  const resolveBindingFromAnnotationClick = (
-    eventPayload: unknown,
-  ): PeakAnnotationBinding | null => {
-    if (typeof eventPayload !== 'object' || eventPayload === null) {
-      return null
-    }
-
-    const payload = eventPayload as PlotlyAnnotationClickPayload
-    const annotation = payload.annotation ?? null
-    const customDataBinding = parseBindingFromCustomData(annotation?.customdata)
-    if (customDataBinding) {
-      return customDataBinding
-    }
-
-    const annotationIndex = parseAnnotationIndexFromPayload(payload)
-    if (annotationIndex !== null) {
-      const mapped = annotationIndexMapRef.current[annotationIndex]
-      if (mapped) {
-        return mapped
-      }
-    }
-
-    return resolveBindingByFallback(annotation?.x)
-  }
-
-  const handleAnnotationClickEvent = (eventPayload: unknown) => {
-    if (typeof eventPayload !== 'object' || eventPayload === null) {
-      return
-    }
-
-    const payload = eventPayload as PlotlyAnnotationClickPayload
-    const mouseButton = Number(payload.event?.button)
-    if (Number.isFinite(mouseButton) && mouseButton !== 0) {
-      return
-    }
-
-    const binding = resolveBindingFromAnnotationClick(payload)
-    if (!binding) {
-      return
-    }
-
-    const shiftPressed = shiftDownRef.current || payload.event?.shiftKey === true
-    if (shiftPressed) {
-      deletePeakByBinding(binding)
-      setSelectedPeak((current) =>
-        current &&
-        current.spectrumId === binding.spectrumId &&
-        current.peakId === binding.peakId
-          ? null
-          : current,
-      )
-      return
-    }
-
-    setSelectedPeak({
-      spectrumId: binding.spectrumId,
-      peakId: binding.peakId,
-      source: binding.source,
-      ...(Number.isFinite(binding.x) ? { x: binding.x } : {}),
-    })
-  }
-
   const handlePlotRelayout = (relayoutEvent: unknown) => {
     if (!leaderLabelsActive) {
       return
@@ -1333,35 +1085,12 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     }
 
     const relayoutPayload = relayoutEvent as Readonly<Record<string, unknown>>
-    const clearedAnnotationIndexes = parseAnnotationTextClears(relayoutPayload)
-    if (clearedAnnotationIndexes.size > 0) {
-      for (const annotationIndex of clearedAnnotationIndexes) {
-        const binding = annotationIndexMapRef.current[annotationIndex]
-        if (!binding) {
-          continue
-        }
-
-        deletePeakByBinding(binding)
-        setSelectedPeak((current) =>
-          current &&
-          current.spectrumId === binding.spectrumId &&
-          current.peakId === binding.peakId
-            ? null
-            : current,
-        )
-      }
-    }
-
     const updatesByIndex = parseAnnotationOffsetUpdates(relayoutPayload)
     if (updatesByIndex.size === 0) {
       return
     }
 
     for (const [annotationIndex, update] of updatesByIndex) {
-      if (clearedAnnotationIndexes.has(annotationIndex)) {
-        continue
-      }
-
       const binding = annotationIndexMapRef.current[annotationIndex]
       if (!binding) {
         continue
@@ -1385,40 +1114,64 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     }
   }
 
-  const setupPlotlyClickAnnotationListener = useCallback(
+  const unbindAnnotationDomClickListeners = useCallback(() => {
+    for (const listener of boundAnnotationDomListenersRef.current) {
+      listener.element.removeEventListener('click', listener.handler)
+    }
+    boundAnnotationDomListenersRef.current = []
+  }, [])
+
+  const bindAnnotationDomClickListeners = useCallback(
     (graphDiv: PlotlyHTMLElement | null) => {
-      const eventBridge =
-        onPlotlyClickAnnotationBridgeRef.current ??
-        ((payload: unknown) => {
-          onPlotlyClickAnnotationRef.current(payload)
+      if (boundAnnotationDomGraphDivRef.current !== graphDiv) {
+        unbindAnnotationDomClickListeners()
+        boundAnnotationDomGraphDivRef.current = graphDiv
+      } else {
+        unbindAnnotationDomClickListeners()
+      }
+
+      if (!graphDiv) {
+        return
+      }
+
+      const annotationElements = Array.from(
+        graphDiv.querySelectorAll('.annotation'),
+      )
+      const nextListeners: BoundAnnotationDomListener[] = []
+
+      for (let i = 0; i < annotationElements.length; i += 1) {
+        const binding = annotationIndexMapRef.current[i]
+        if (!binding) {
+          continue
+        }
+
+        const element = annotationElements[i]
+        const clickHandler = () => {
+          setSelectedPeak({
+            spectrumId: binding.spectrumId,
+            peakId: binding.peakId,
+            source: binding.source,
+          })
+
+          if (binding.spectrumId !== activeSpectrumId) {
+            dispatch({
+              type: 'SPECTRUM_SET_ACTIVE',
+              id: binding.spectrumId,
+            })
+          }
+        }
+
+        element.addEventListener('click', clickHandler)
+        nextListeners.push({
+          element,
+          handler: clickHandler,
         })
-      onPlotlyClickAnnotationBridgeRef.current = eventBridge
-
-      const nextGraphDiv = graphDiv as PlotlyAnnotationEmitter | null
-      const previousGraphDiv = boundAnnotationGraphDivRef.current
-
-      if (previousGraphDiv && previousGraphDiv !== nextGraphDiv) {
-        detachPlotlyAnnotationListener(previousGraphDiv, eventBridge)
-        boundAnnotationGraphDivRef.current = null
       }
 
-      if (!nextGraphDiv || typeof nextGraphDiv.on !== 'function') {
-        return
-      }
-
-      if (boundAnnotationGraphDivRef.current === nextGraphDiv) {
-        return
-      }
-
-      nextGraphDiv.on('plotly_clickannotation', eventBridge)
-      boundAnnotationGraphDivRef.current = nextGraphDiv
+      boundAnnotationDomListenersRef.current = nextListeners
     },
-    [],
+    [activeSpectrumId, dispatch, unbindAnnotationDomClickListeners],
   )
-
-  useEffect(() => {
-    onPlotlyClickAnnotationRef.current = handleAnnotationClickEvent
-  })
 
   useEffect(() => {
     const map: Record<number, PeakAnnotationBinding> = {}
@@ -1427,6 +1180,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       map[peakAnnotationStartIndex + i] = peakAnnotationBindings[i]
     }
     annotationIndexMapRef.current = map
+    bindAnnotationDomClickListeners(plotDivRef.current)
   })
 
   useEffect(() => {
@@ -1446,13 +1200,13 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         return
       }
 
-      const selected = selectedPeakRef.current
-      if (!selected) {
+      const target = selectedPeakRef.current
+      if (!target) {
         return
       }
 
       event.preventDefault()
-      deletePeakByBinding(selected)
+      deletePeakByBinding(target)
       setSelectedPeak(null)
     }
 
@@ -1463,47 +1217,11 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   }, [deletePeakByBinding])
 
   useEffect(() => {
-    const handleShiftDown = (event: KeyboardEvent) => {
-      if (event.key === 'Shift') {
-        shiftDownRef.current = true
-      }
-    }
-
-    const handleShiftUp = (event: KeyboardEvent) => {
-      if (event.key === 'Shift') {
-        shiftDownRef.current = false
-      }
-    }
-
-    const handleWindowBlur = () => {
-      shiftDownRef.current = false
-    }
-
-    window.addEventListener('keydown', handleShiftDown)
-    window.addEventListener('keyup', handleShiftUp)
-    window.addEventListener('blur', handleWindowBlur)
-
     return () => {
-      window.removeEventListener('keydown', handleShiftDown)
-      window.removeEventListener('keyup', handleShiftUp)
-      window.removeEventListener('blur', handleWindowBlur)
+      unbindAnnotationDomClickListeners()
+      boundAnnotationDomGraphDivRef.current = null
     }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      const eventBridge = onPlotlyClickAnnotationBridgeRef.current
-      if (!eventBridge) {
-        return
-      }
-
-      detachPlotlyAnnotationListener(
-        boundAnnotationGraphDivRef.current,
-        eventBridge,
-      )
-      boundAnnotationGraphDivRef.current = null
-    }
-  }, [])
+  }, [unbindAnnotationDomClickListeners])
 
   useEffect(() => {
     if (!plotDivRef.current) {
@@ -1648,7 +1366,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
         <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Plot</h2>
 
         <div
-          className={`mt-4 min-h-[20rem] flex-none overflow-hidden rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${canvasFrameClass} ${tickClass}`}
+          className={`relative mt-4 min-h-[20rem] flex-none overflow-hidden rounded-lg border border-slate-200 p-2 dark:border-slate-800 ${canvasFrameClass} ${tickClass}`}
           style={plotFrameStyle}
         >
           <Plot
@@ -1658,7 +1376,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             config={config}
             onInitialized={(_, graphDiv) => {
               plotDivRef.current = graphDiv as PlotlyHTMLElement
-              setupPlotlyClickAnnotationListener(
+              bindAnnotationDomClickListeners(
                 graphDiv as PlotlyHTMLElement,
               )
               applyTickTextInlineStyles(plotDivRef.current, {
@@ -1668,7 +1386,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
             }}
             onUpdate={(_, graphDiv) => {
               plotDivRef.current = graphDiv as PlotlyHTMLElement
-              setupPlotlyClickAnnotationListener(
+              bindAnnotationDomClickListeners(
                 graphDiv as PlotlyHTMLElement,
               )
               applyTickTextInlineStyles(plotDivRef.current, {
@@ -1683,13 +1401,23 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           />
         </div>
 
-        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-          Debug: traces={traces.length}, active={resolvedActiveSpectrum?.name ?? 'none'}, x=[
-          {formatRangeValue(xRange.min)}, {formatRangeValue(xRange.max)}], y=[
-          {formatRangeValue(yRange.min)}, {formatRangeValue(yRange.max)}]
-        </p>
-
-        {hasAnyPeaksForTable ? <PeaksListPanel /> : null}
+        {hasAnyPeaksForTable ? (
+          <PeaksListPanel
+            selectedPeak={selectedPeak}
+            onSelectPeak={(peak) => setSelectedPeak(peak)}
+            onDeletePeak={(peak) => {
+              deletePeakByBinding(peak)
+              setSelectedPeak((current) =>
+                current &&
+                current.spectrumId === peak.spectrumId &&
+                current.peakId === peak.peakId &&
+                current.source === peak.source
+                  ? null
+                  : current,
+              )
+            }}
+          />
+        ) : null}
       </div>
     </section>
   )

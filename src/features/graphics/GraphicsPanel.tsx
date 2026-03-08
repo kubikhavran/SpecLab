@@ -6,7 +6,6 @@ import {
 } from 'react'
 import type { GraphicsPalette } from '../../app/types/core'
 import { useAppDispatch, useAppState } from '../../app/state/AppStore'
-import { toSubscript, toSuperscript } from '../../lib/text/superSub'
 
 const fontFamilies = ['Arial', 'Inter', 'Times New Roman', 'Courier New'] as const
 const paletteOptions: Array<{ label: string; value: GraphicsPalette }> = [
@@ -34,9 +33,6 @@ function clamp(value: number, min: number, max: number): number {
 
 type AxisLabelKey = 'xLabel' | 'yLabel'
 type ScriptKind = 'super' | 'sub'
-
-const SUPER_PLACEHOLDER = '\u2070'
-const SUB_PLACEHOLDER = '\u2080'
 
 export function GraphicsPanel() {
   const { graphics } = useAppState()
@@ -99,20 +95,21 @@ export function GraphicsPanel() {
     const selectionStart = input.selectionStart ?? currentValue.length
     const selectionEnd = input.selectionEnd ?? selectionStart
     const hasSelection = selectionEnd > selectionStart
-    const converter = kind === 'super' ? toSuperscript : toSubscript
-    const sourceText = hasSelection
-      ? currentValue.slice(selectionStart, selectionEnd)
-      : kind === 'super'
-        ? SUPER_PLACEHOLDER
-        : SUB_PLACEHOLDER
-    const converted = converter(sourceText)
-    const nextValue = `${currentValue.slice(0, selectionStart)}${converted}${currentValue.slice(selectionEnd)}`
+    const prefix = currentValue.slice(0, selectionStart)
+    const suffix = currentValue.slice(selectionEnd)
+
+    const wrapped =
+      kind === 'super'
+        ? `^{${currentValue.slice(selectionStart, selectionEnd)}}`
+        : `_{${currentValue.slice(selectionStart, selectionEnd)}}`
+    const inserted = kind === 'super' ? '^{}' : '_{}'
+    const nextValue = hasSelection
+      ? `${prefix}${wrapped}${suffix}`
+      : `${prefix}${inserted}${suffix}`
     const nextSelectionStart = hasSelection
-      ? selectionStart + converted.length
-      : selectionStart
-    const nextSelectionEnd = hasSelection
-      ? nextSelectionStart
-      : nextSelectionStart + converted.length
+      ? selectionStart + wrapped.length
+      : selectionStart + 2
+    const nextSelectionEnd = nextSelectionStart
 
     setAxisLabel(axisLabel, nextValue)
 
@@ -262,8 +259,7 @@ export function GraphicsPanel() {
         </label>
       </div>
       <p className="text-[11px] text-slate-500">
-        Tip: use ^{'{...}'} for superscript and _{'{...}'} for subscript (e.g.,
-        {' '}cm^{'{-1}'}, E_{'{corr}'}).
+        {'Tip: use x^ / x_ buttons or write ^{...} / _{...} manually (e.g., cm^{-1}, E_{corr}).'}
       </p>
 
       <div className="grid grid-cols-2 gap-1">
