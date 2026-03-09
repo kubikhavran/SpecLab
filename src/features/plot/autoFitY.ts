@@ -1,4 +1,5 @@
-import type { Spectrum } from '../../app/types/core'
+import type { Spectrum, YAxisMode } from '../../app/types/core'
+import { convertYAxis } from './convertYAxis'
 
 type ComputeAutoFitYOptions = {
   spectra: Spectrum[]
@@ -7,6 +8,7 @@ type ComputeAutoFitYOptions = {
   stackOffset: number
   xMin: number | null
   xMax: number | null
+  yAxisMode: YAxisMode
 }
 
 type YRange = {
@@ -79,8 +81,15 @@ function getXWindow(
 }
 
 export function computeAutoFitY(options: ComputeAutoFitYOptions): YRange | null {
-  const { spectra, activeSpectrumId, showAllSpectra, stackOffset, xMin, xMax } =
-    options
+  const {
+    spectra,
+    activeSpectrumId,
+    showAllSpectra,
+    stackOffset,
+    xMin,
+    xMax,
+    yAxisMode,
+  } = options
   const plottedSpectra = getPlottedSpectra(
     spectra,
     activeSpectrumId,
@@ -104,10 +113,15 @@ export function computeAutoFitY(options: ComputeAutoFitYOptions): YRange | null 
     const spectrum = plottedSpectra[spectrumIndex]
     const pointCount = Math.min(spectrum.x.length, spectrum.y.length)
     const yOffset = spectrumIndex * stackOffset
+    const rawSlice = spectrum.y.slice(0, pointCount)
+    const stackedRaw = yOffset === 0
+      ? rawSlice
+      : rawSlice.map((v) => v + yOffset)
+    const convertedSlice = convertYAxis(stackedRaw, yAxisMode)
 
     for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
       const xValue = spectrum.x[pointIndex]
-      const yValue = spectrum.y[pointIndex]
+      const yValue = convertedSlice[pointIndex]
 
       if (!Number.isFinite(xValue) || !Number.isFinite(yValue)) {
         continue
@@ -117,14 +131,12 @@ export function computeAutoFitY(options: ComputeAutoFitYOptions): YRange | null 
         continue
       }
 
-      const stackedY = yValue + yOffset
-
-      if (stackedY < yMin) {
-        yMin = stackedY
+      if (yValue < yMin) {
+        yMin = yValue
       }
 
-      if (stackedY > yMax) {
-        yMax = stackedY
+      if (yValue > yMax) {
+        yMax = yValue
       }
     }
   }

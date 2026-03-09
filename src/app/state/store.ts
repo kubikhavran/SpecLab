@@ -59,6 +59,8 @@ export const initialState: AppState = {
     yMin: null,
     yMax: null,
     invertX: false,
+    invertY: false,
+    yAxisMode: 'as-loaded' as const,
   },
   dataLabeling: { ...DEFAULT_DATA_LABELING_SETTINGS },
   ...loadPresetsFromStorage(),

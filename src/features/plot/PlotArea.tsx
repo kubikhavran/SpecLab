@@ -24,6 +24,7 @@ import {
   type SelectedPeakRow,
 } from '../peaks/PeaksListPanel'
 import { applyTickTextInlineStyles } from './tickTextStyles'
+import { convertYAxis } from './convertYAxis'
 
 type PlotSeries = {
   id: string
@@ -62,7 +63,7 @@ type SpectrumTraceMeta = {
 type PeakAnnotationBinding = {
   spectrumId: string
   peakId: string
-  source: 'auto' | 'manual'
+  source: 'auto' | 'manual' | 'imported'
   x?: number
 }
 
@@ -542,12 +543,17 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           const yBase = processedYById[spectrum.id] ?? yRawOrCosmic
           const ySmoothed = smoothedYById[spectrum.id] ?? yBase
           const yToPlot = manualCleanYById[spectrum.id] ?? ySmoothed
+          const yOffset = overlayMode ? index * plot.stackOffset : 0
+          const yRawStacked = yOffset === 0
+            ? yToPlot
+            : yToPlot.map((v) => v + yOffset)
+          const yConverted = convertYAxis(yRawStacked, plot.yAxisMode)
 
           return toSeries(
             spectrum,
-            yToPlot,
+            yConverted,
             resolvedActiveId,
-            overlayMode ? index * plot.stackOffset : 0,
+            0,
           )
         })
       : [
@@ -644,15 +650,21 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
     }
 
     const xSource = spectrum.x.slice(0, pointCount)
-    const yDisplayedSource = yDisplayed
-      .slice(0, pointCount)
-      .map((value) => value + offset)
-    const yProcessedSource =
+    const yDisplayedRaw = yDisplayed.slice(0, pointCount)
+    const yDisplayedStacked = offset === 0
+      ? yDisplayedRaw
+      : yDisplayedRaw.map((v) => v + offset)
+    const yDisplayedSource = convertYAxis(yDisplayedStacked, plot.yAxisMode)
+    const yProcessedRaw =
       Array.isArray(yProcessed) && yProcessed.length > 0
-        ? yProcessed
-            .slice(0, Math.min(spectrum.x.length, yProcessed.length))
-            .map((value) => value + offset)
-        : yDisplayedSource
+        ? yProcessed.slice(0, Math.min(spectrum.x.length, yProcessed.length))
+        : null
+    const yProcessedStacked = yProcessedRaw
+      ? (offset === 0 ? yProcessedRaw : yProcessedRaw.map((v) => v + offset))
+      : null
+    const yProcessedSource = yProcessedStacked
+      ? convertYAxis(yProcessedStacked, plot.yAxisMode)
+      : yDisplayedSource
     const ySource =
       peaks.source === 'processed'
         ? yProcessedSource
@@ -670,7 +682,7 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       let xValue = Number.NaN
       let yValue = Number.NaN
 
-      if (peak.source === 'manual') {
+      if (peak.source === 'manual' || peak.source === 'imported') {
         xValue = peak.x
         const interpolatedY = interpolateYAtX(xForSource, yForSource, xValue)
         yValue = interpolatedY ?? Number.NaN
@@ -808,14 +820,22 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
           type: 'scatter',
           mode: 'lines',
           name: `${resolvedActiveSpectrum.name} baseline`,
-          x: resolvedActiveSpectrum.x.slice(
-            0,
-            Math.min(resolvedActiveSpectrum.x.length, activeBaselineY.length),
-          ),
-          y: activeBaselineY.slice(
-            0,
-            Math.min(resolvedActiveSpectrum.x.length, activeBaselineY.length),
-          ),
+          x: resolvedActiveSpectrum.x.slice(0, Math.min(
+            resolvedActiveSpectrum.x.length,
+            activeBaselineY.length,
+          )),
+          y: (() => {
+            const baselinePointCount = Math.min(
+              resolvedActiveSpectrum.x.length,
+              activeBaselineY.length,
+            )
+            const baselineRaw = activeBaselineY.slice(0, baselinePointCount)
+            const baselineOffset = 0
+            const baselineRawStacked = baselineOffset === 0
+              ? baselineRaw
+              : baselineRaw.map((value) => value + baselineOffset)
+            return convertYAxis(baselineRawStacked, plot.yAxisMode)
+          })(),
           line: {
             color: '#94a3b8',
             width: 1.5,
@@ -944,7 +964,10 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
   const deletePeakByBinding = useCallback(
     (binding: SelectedPeakRow) => {
       dispatch({
-        type: binding.source === 'manual' ? 'PEAKS_MANUAL_DELETE' : 'PEAKS_AUTO_DELETE',
+        type:
+          binding.source === 'manual' || binding.source === 'imported'
+            ? 'PEAKS_MANUAL_DELETE'
+            : 'PEAKS_AUTO_DELETE',
         spectrumId: binding.spectrumId,
         peakId: binding.peakId,
       })
@@ -1329,10 +1352,12 @@ export function PlotArea({ plotDivRef }: PlotAreaProps) {
       ...(hasYRange
         ? {
             autorange: false,
-            range: [plot.yMin, plot.yMax],
+            range: plot.invertY
+              ? [plot.yMax, plot.yMin]
+              : [plot.yMin, plot.yMax],
           }
         : {
-            autorange: true,
+            autorange: plot.invertY ? 'reversed' : true,
           }),
     },
   }

@@ -5,7 +5,7 @@ type PeakRow = {
   id: string
   x: number
   y: number | null
-  source: 'auto' | 'manual'
+  source: 'auto' | 'manual' | 'imported'
 }
 
 type PeakGroup = {
@@ -17,7 +17,7 @@ type PeakGroup = {
 export type SelectedPeakRow = {
   spectrumId: string
   peakId: string
-  source: 'auto' | 'manual'
+  source: 'auto' | 'manual' | 'imported'
 }
 
 type ExportFormat = 'tsv' | 'csv'
@@ -219,7 +219,7 @@ export function PeaksListPanel({
             id: peak.id,
             x: peak.x,
             y: interpolateYAtX(spectrum.x, ySource, peak.x),
-            source: 'manual',
+            source: peak.source === 'imported' ? 'imported' : 'manual',
           }))
         const rows = [...autoRows, ...manualRows].sort((a, b) => a.x - b.x)
 
@@ -259,7 +259,7 @@ export function PeaksListPanel({
           encodeDelimitedField(group.spectrumName, delimiter),
           encodeDelimitedField(row.x.toFixed(decimals), delimiter),
           encodeDelimitedField(formatY(row.y), delimiter),
-          row.source === 'auto' ? 'A' : 'M',
+          row.source === 'auto' ? 'A' : row.source === 'imported' ? 'I' : 'M',
         ].join(delimiter),
       ),
     )
@@ -483,7 +483,7 @@ export function PeaksListPanel({
                             {formatY(row.y)}
                           </td>
                           <td className="px-2 py-1 text-slate-500 dark:text-slate-400">
-                            {row.source === 'auto' ? 'A' : 'M'}
+                            {row.source === 'auto' ? 'A' : row.source === 'imported' ? 'I' : 'M'}
                           </td>
                           <td className="px-2 py-1">
                             <button

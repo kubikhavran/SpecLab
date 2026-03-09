@@ -22,6 +22,8 @@ export interface PlotSettings {
   yMin?: number | null
   yMax?: number | null
   invertX: boolean
+  invertY: boolean
+  yAxisMode: YAxisMode
 }
 
 export interface BaselineSettings {
@@ -47,7 +49,8 @@ export interface CosmicSettings {
 }
 
 export type PeakKind = 'max' | 'min'
-export type PeakSource = 'auto' | 'manual'
+export type PeakSource = 'auto' | 'manual' | 'imported'
+export type YAxisMode = 'as-loaded' | 'absorbance' | 'transmittance'
 
 // Manual peaks store only X/index; Y is resolved from plotted data at render time.
 export type Peak = {

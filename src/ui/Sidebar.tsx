@@ -1,6 +1,6 @@
 import type { MutableRefObject } from 'react'
 import type { PlotlyHTMLElement } from 'plotly.js'
-import type { PlotCanvasMode, ThemeMode } from '../app/types/core'
+import type { PlotCanvasMode, ThemeMode, YAxisMode } from '../app/types/core'
 import { ImportSpectrum } from '../features/import/ImportSpectrum'
 import { ExportPanel } from '../features/export/ExportPanel'
 import { GraphicsPanel } from '../features/graphics/GraphicsPanel'
@@ -41,7 +41,11 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
 
     dispatch({
       type: 'PLOT_SET',
-      patch: { stackOffset: clampedValue },
+      patch: {
+        stackOffset: clampedValue,
+        yMin: null,
+        yMax: null,
+      },
     })
   }
 
@@ -89,6 +93,7 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
       stackOffset: plot.stackOffset,
       xMin: plot.xMin ?? null,
       xMax: plot.xMax ?? null,
+      yAxisMode: plot.yAxisMode,
     })
 
     if (!result) {
@@ -185,12 +190,57 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
                       onChange={(event) =>
                         dispatch({
                           type: 'PLOT_SET',
-                          patch: { invertX: event.currentTarget.checked },
+                          patch: {
+                            invertX: event.currentTarget.checked,
+                            uiRevision: (plot.uiRevision ?? 1) + 1,
+                          },
                         })
                       }
                     />
                     <span>Invert X axis</span>
                   </label>
+
+                  <label className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                      checked={plot.invertY}
+                      onChange={(event) =>
+                        dispatch({
+                          type: 'PLOT_SET',
+                          patch: {
+                            invertY: event.currentTarget.checked,
+                            uiRevision: (plot.uiRevision ?? 1) + 1,
+                          },
+                        })
+                      }
+                    />
+                    <span>Invert Y axis</span>
+                  </label>
+
+                  <div className="space-y-0.5">
+                    <span className="text-[11px] text-slate-600">Y-axis mode</span>
+                    <select
+                      className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs text-slate-700"
+                      value={plot.yAxisMode}
+                      onChange={(event) =>
+                        dispatch({
+                          type: 'PLOT_SET',
+                          patch: {
+                            yAxisMode: event.currentTarget.value as YAxisMode,
+                            stackOffset: 0,
+                            yMin: null,
+                            yMax: null,
+                            uiRevision: (plot.uiRevision ?? 1) + 1,
+                          },
+                        })
+                      }
+                    >
+                      <option value="as-loaded">As loaded</option>
+                      <option value="absorbance">-&gt; Absorbance (from %T)</option>
+                      <option value="transmittance">-&gt; Transmittance (from Abs)</option>
+                    </select>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-1">
                     <label className="space-y-0.5">
@@ -270,14 +320,14 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
 
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-slate-700">
-                      Stack offset (Y)
+                      Stack offset (Y, raw %T)
                     </p>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={20000}
-                        step={100}
+                        step={10}
                         className="w-full accent-sky-600"
                         value={plot.stackOffset}
                         disabled={stackOffsetDisabled}
@@ -289,7 +339,7 @@ export function Sidebar({ plotDivRef }: SidebarProps) {
                         type="number"
                         min={0}
                         max={20000}
-                        step={100}
+                        step={10}
                         className="w-20 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
                         value={plot.stackOffset}
                         disabled={stackOffsetDisabled}
